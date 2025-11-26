@@ -1,11 +1,12 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { ArrowLeft, Send, Heart, Share2, Gift as GiftIcon, Users, Crown, Mic, MicOff, Lock, Unlock, Settings, Image as ImageIcon, X, Info, Minimize2, LogOut, Check, BadgeCheck, MoreHorizontal, User as UserIcon, Loader2, Upload, Shield } from 'lucide-react';
+import { ArrowLeft, Send, Heart, Share2, Gift as GiftIcon, Users, Crown, Mic, MicOff, Lock, Unlock, Settings, Image as ImageIcon, X, Info, Minimize2, LogOut, Check, BadgeCheck, MoreHorizontal, User as UserIcon, Loader2, Upload, Shield, Trophy } from 'lucide-react';
 import { Room, ChatMessage, Gift, Language, User, RoomSeat } from '../types';
 import { GIFTS, STORE_ITEMS, ROOM_BACKGROUNDS, VIP_TIERS, ADMIN_ROLES } from '../constants';
 import { listenToMessages, sendMessage, takeSeat, leaveSeat, updateRoomDetails, sendGiftTransaction, toggleSeatLock, toggleSeatMute, decrementViewerCount } from '../services/firebaseService';
 import { joinVoiceChannel, leaveVoiceChannel, toggleMicMute } from '../services/agoraService';
 import UserProfileModal from './UserProfileModal';
+import RoomLeaderboard from './RoomLeaderboard';
 
 interface RoomViewProps {
   room: Room;
@@ -21,6 +22,7 @@ const RoomView: React.FC<RoomViewProps> = ({ room, currentUser, onAction, langua
   const [showRoomSettings, setShowRoomSettings] = useState(false);
   const [showExitModal, setShowExitModal] = useState(false);
   const [showUserList, setShowUserList] = useState(false);
+  const [showLeaderboard, setShowLeaderboard] = useState(false);
   
   const [selectedUser, setSelectedUser] = useState<RoomSeat | null>(null);
   const [seatToConfirm, setSeatToConfirm] = useState<number | null>(null);
@@ -384,6 +386,15 @@ const RoomView: React.FC<RoomViewProps> = ({ room, currentUser, onAction, langua
             </div>
         </div>
         <div className="flex gap-2">
+            {/* Room Leaderboard Button */}
+            <button 
+              onClick={() => setShowLeaderboard(true)} 
+              className="bg-gradient-to-r from-yellow-600 to-yellow-400 backdrop-blur px-3 py-1.5 rounded-full text-xs font-black text-black flex items-center gap-1 border border-yellow-300 hover:scale-105 transition shadow-lg shadow-yellow-500/30"
+            >
+                <Trophy className="w-3 h-3 fill-black" />
+                Cup
+            </button>
+
             {isHost && (
                 <button onClick={() => setShowRoomSettings(true)} className="p-2 bg-white/10 rounded-full text-white backdrop-blur hover:bg-white/20 transition"><Settings className="w-4 h-4" /></button>
             )}
@@ -598,6 +609,13 @@ const RoomView: React.FC<RoomViewProps> = ({ room, currentUser, onAction, langua
                   setSelectedUser(null);
                   setShowGiftPanel(true);
               }}
+          />
+      )}
+
+      {showLeaderboard && (
+          <RoomLeaderboard 
+              contributors={room.seats.filter(s => s.userId).map(s => ({ userId: s.userId!, name: s.userName!, avatar: s.userAvatar!, amount: s.giftCount }))} // Temporary mock data mapping, needs real contributors from DB if available separately
+              onClose={() => setShowLeaderboard(false)}
           />
       )}
 

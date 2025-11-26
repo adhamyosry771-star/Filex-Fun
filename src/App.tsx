@@ -382,7 +382,7 @@ const App: React.FC = () => {
         const wealthIcon = getIconByLevel(wealthInfo.level, 'wealth');
         const charmIcon = getIconByLevel(charmInfo.level, 'charm');
 
-        // Check specifically for the Owner ID 'OFFECAL' to show the Admin Panel button
+        // STRICTLY CHECK FOR OWNER ID 'OFFECAL' TO SHOW ADMIN BUTTON
         const isOwner = userProfile.id === 'OFFECAL';
 
         return (
@@ -534,6 +534,7 @@ const App: React.FC = () => {
                 </div>
 
                 <div className="glass-card rounded-2xl overflow-hidden mb-6 bg-gray-800/50">
+                    {/* ONLY SHOW ADMIN PANEL IF IS OWNER (OFFECAL) */}
                     {isOwner && (
                         <div onClick={() => setCurrentView(ViewState.ADMIN)} className="p-4 border-b border-white/5 flex justify-between items-center bg-red-900/10 hover:bg-red-900/20 transition cursor-pointer group">
                             <div className="flex items-center gap-3"><Shield className="w-5 h-5 text-red-500 transition group-hover:scale-110" /><span className="text-sm font-bold text-red-400">{t('admin')}</span></div>

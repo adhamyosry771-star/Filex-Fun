@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { Shield, Trash2, Ban, Search, Gift, Crown, ArrowLeft, RefreshCw, CheckCircle, Megaphone, Edit3, Send, Home, XCircle, Flame, Star, Image as ImageIcon, Plus, X, Database } from 'lucide-react';
+import { Shield, Trash2, Ban, Search, Gift, Crown, ArrowLeft, RefreshCw, CheckCircle, Megaphone, Edit3, Send, Home, XCircle, Flame, Image as ImageIcon, Plus, X, Database } from 'lucide-react';
 import { getAllUsers, adminUpdateUser, deleteAllRooms, sendSystemNotification, broadcastOfficialMessage, searchUserByDisplayId, getRoomByHostId, adminBanRoom, deleteRoom, toggleRoomHotStatus, addBanner, deleteBanner, listenToBanners } from '../services/firebaseService';
 import { Language, User, Room, Banner } from '../types';
 import { VIP_TIERS, ADMIN_ROLES } from '../constants';
@@ -14,7 +14,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, language }) => 
   const [users, setUsers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
-  const [activeTab, setActiveTab] = useState<'users' | 'system' | 'official' | 'banners'>('users');
+  const [activeTab, setActiveTab] = useState<'users' | 'agencies' | 'system' | 'official' | 'banners'>('users');
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   
   // Search Results
@@ -351,6 +351,9 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, language }) => 
       }
   };
 
+  // Filter Agents
+  const agents = users.filter(u => u.isAgent);
+
   return (
     <div dir="rtl" className="h-full bg-black text-gold-400 flex flex-col font-sans relative">
       {/* Header */}
@@ -373,6 +376,12 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, language }) => 
                 المستخدمين
             </button>
             <button 
+                onClick={() => setActiveTab('agencies')}
+                className={`px-3 py-1 rounded border border-gold-500/30 text-[10px] font-bold whitespace-nowrap ${activeTab === 'agencies' ? 'bg-blue-500 text-white' : 'text-blue-500'}`}
+            >
+                الوكالات
+            </button>
+            <button 
                 onClick={() => setActiveTab('banners')}
                 className={`px-3 py-1 rounded border border-gold-500/30 text-[10px] font-bold whitespace-nowrap ${activeTab === 'banners' ? 'bg-purple-600 text-white' : 'text-purple-500'}`}
             >
@@ -380,7 +389,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, language }) => 
             </button>
             <button 
                 onClick={() => setActiveTab('official')}
-                className={`px-3 py-1 rounded border border-gold-500/30 text-[10px] font-bold whitespace-nowrap ${activeTab === 'official' ? 'bg-blue-600 text-white' : 'text-blue-500'}`}
+                className={`px-3 py-1 rounded border border-gold-500/30 text-[10px] font-bold whitespace-nowrap ${activeTab === 'official' ? 'bg-green-600 text-white' : 'text-green-500'}`}
             >
                 رسائل
             </button>
@@ -538,6 +547,50 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, language }) => 
                       </div>
                   ))}
               </div>
+          </div>
+      )}
+
+      {activeTab === 'agencies' && (
+          <div className="flex-1 p-6 flex flex-col overflow-y-auto">
+              <h3 className="font-bold text-blue-400 mb-4 flex items-center gap-2">
+                  <Database className="w-5 h-5"/> وكالات الشحن النشطة
+              </h3>
+              
+              {loading ? (
+                  <div className="text-center text-gray-500">جاري التحميل...</div>
+              ) : agents.length === 0 ? (
+                  <div className="text-center text-gray-500 mt-10 p-10 border border-gray-800 rounded-xl">لا يوجد وكلاء حالياً</div>
+              ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {agents.map(agent => (
+                          <div key={agent.uid} className="bg-gray-900 border border-blue-900/50 rounded-xl p-4 flex flex-col gap-3 relative overflow-hidden">
+                              <div className="absolute top-0 right-0 p-2 opacity-10"><Database className="w-20 h-20 text-blue-500"/></div>
+                              
+                              <div className="flex items-center gap-3 relative z-10">
+                                  <img src={agent.avatar} className="w-12 h-12 rounded-full border-2 border-blue-500" />
+                                  <div>
+                                      <div className="font-bold text-white">{agent.name}</div>
+                                      <div className="text-xs text-gray-400">ID: {agent.id}</div>
+                                  </div>
+                              </div>
+                              
+                              <div className="bg-black/40 rounded-lg p-3 flex justify-between items-center relative z-10 border border-blue-500/20">
+                                  <span className="text-xs text-gray-400">رصيد الوكالة</span>
+                                  <span className="text-xl font-bold text-blue-400">{agent.agencyBalance?.toLocaleString()} 💎</span>
+                              </div>
+
+                              <div className="flex gap-2 mt-1 relative z-10">
+                                  <button onClick={() => handleRechargeAgency(agent.uid)} className="flex-1 bg-blue-600 hover:bg-blue-500 text-white text-xs py-2 rounded font-bold flex items-center justify-center gap-1">
+                                      <Plus className="w-3 h-3"/> شحن
+                                  </button>
+                                  <button onClick={() => handleRevokeAgent(agent.uid)} className="flex-1 bg-red-900/50 hover:bg-red-900 text-red-400 border border-red-900 text-xs py-2 rounded font-bold flex items-center justify-center gap-1">
+                                      <X className="w-3 h-3"/> سحب الوكالة
+                                  </button>
+                              </div>
+                          </div>
+                      ))}
+                  </div>
+              )}
           </div>
       )}
 

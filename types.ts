@@ -11,7 +11,8 @@ export enum ViewState {
   ADMIN = 'ADMIN',
   GAMES = 'GAMES',
   SEARCH = 'SEARCH',
-  PRIVATE_CHAT = 'PRIVATE_CHAT'
+  PRIVATE_CHAT = 'PRIVATE_CHAT',
+  AGENCY = 'AGENCY'
 }
 
 export type Language = 'ar' | 'en';
@@ -35,6 +36,7 @@ export interface User {
   avatar: string;
   level: number;
   diamondsSpent?: number;
+  diamondsReceived?: number; // For Charm Level
   vip: boolean;
   vipLevel?: number;
   country?: string;
@@ -49,8 +51,10 @@ export interface User {
   followingCount?: number;
   visitorsCount?: number;
   isAdmin?: boolean;
-  adminRole?: 'super_admin' | 'admin' | null; // New field
+  adminRole?: 'super_admin' | 'admin' | null;
   isBanned?: boolean;
+  isAgent?: boolean;
+  agencyBalance?: number;
 }
 
 export interface Notification {
@@ -74,7 +78,7 @@ export interface ChatMessage {
   frameId?: string;
   bubbleId?: string;
   vipLevel?: number;
-  adminRole?: 'super_admin' | 'admin' | null; // New field to show badge in chat
+  adminRole?: 'super_admin' | 'admin' | null;
 }
 
 export interface PrivateMessage {
@@ -86,7 +90,7 @@ export interface PrivateMessage {
 }
 
 export interface PrivateChatSummary {
-  chatId: string; // usually combined UIDs
+  chatId: string;
   otherUserUid: string;
   otherUserName: string;
   otherUserAvatar: string;
@@ -103,12 +107,12 @@ export interface RoomSeat {
   isMuted: boolean;
   isLocked: boolean;
   giftCount: number;
-  adminRole?: 'super_admin' | 'admin' | null; // New field for mic badge
+  adminRole?: 'super_admin' | 'admin' | null;
 }
 
 export interface Room {
-  id: string; // Firestore Doc ID (Host UID)
-  displayId: string; // Visible ID (User's custom ID)
+  id: string;
+  displayId: string;
   title: string;
   description?: string;
   hostName: string;
@@ -121,7 +125,7 @@ export interface Room {
   seats: RoomSeat[]; 
   isBanned?: boolean;
   isHot?: boolean;
-  isOfficial?: boolean; // New field
+  isOfficial?: boolean;
 }
 
 export interface Banner {

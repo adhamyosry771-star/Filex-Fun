@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { Home, Trophy, User as UserIcon, Users, PlusCircle, Copy, MessageSquare, Loader2, ChevronRight, Crown, ShoppingBag, Wallet as WalletIcon, Settings, Gem, Coins, Edit3, Zap, X, Trash2, Shield, Info, Smartphone, Star, Gamepad2, BadgeCheck } from 'lucide-react';
+import { Home, Trophy, User as UserIcon, Users, PlusCircle, Copy, MessageSquare, Loader2, ChevronRight, Crown, ShoppingBag, Wallet as WalletIcon, Settings, Gem, Coins, Edit3, Zap, X, Trash2, Shield, Info, Smartphone, Star, Gamepad2, BadgeCheck, Database } from 'lucide-react';
 import HomeView from './components/HomeView';
 import RoomView from './components/RoomView';
 import LoginView from './components/LoginView';
@@ -15,11 +15,12 @@ import MiniRoomPlayer from './components/MiniRoomPlayer';
 import AdminDashboard from './components/AdminDashboard';
 import SearchView from './components/SearchView';
 import PrivateChatView from './components/PrivateChatView';
+import AgencyView from './components/AgencyView';
 import { ViewState, Room, User, Language, PrivateChatSummary } from './types';
 import { auth } from './firebaseConfig';
 import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
 import { getUserProfile, createUserProfile, logoutUser, listenToRooms, updateUserProfile, listenToUserProfile, listenToChatList, initiatePrivateChat, searchUserByDisplayId, incrementViewerCount } from './services/firebaseService';
-import { CURRENT_USER, STORE_ITEMS, VIP_TIERS, ADMIN_ROLES } from './constants';
+import { CURRENT_USER, STORE_ITEMS, VIP_TIERS, ADMIN_ROLES, LEVEL_ICONS, CHARM_ICONS } from './constants';
 
 const App: React.FC = () => {
   const [currentView, setCurrentView] = useState<ViewState>(ViewState.HOME);
@@ -164,7 +165,6 @@ const App: React.FC = () => {
 
   const handleRoomAction = async (action: 'minimize' | 'leave' | 'chat', data?: any) => {
       if (action === 'chat' && data) {
-          // data is targetUserId
           await handleStartPrivateChat(data);
           setMinimizedRoom(activeRoom);
           setActiveRoom(null);
@@ -256,7 +256,8 @@ const App: React.FC = () => {
         privacy: { ar: 'إعدادات الخصوصية', en: 'Privacy Settings' },
         supportMsg: { ar: 'من فضلك توجه إلى روم خدمة العملاء الرسميه', en: 'Please go to the official Customer Service room.' },
         ok: { ar: 'حسناً', en: 'OK' },
-        admin: { ar: 'لوحة التحكم', en: 'Admin Panel' }
+        admin: { ar: 'لوحة التحكم', en: 'Admin Panel' },
+        agency: { ar: 'لوحة الوكالة', en: 'Agency Dashboard' }
     };
     return dict[key][language];
   };
@@ -281,12 +282,11 @@ const App: React.FC = () => {
       return { level, progress: Math.min(Math.max(progress, 0), 100), remaining: requiredForNext - diamondsSpent };
   };
 
-  const getLevelIcon = (level: number) => {
-      if (level >= 80) return "🔥";
-      if (level >= 50) return "💎";
-      if (level >= 30) return "👑";
-      if (level >= 10) return "🛡️";
-      return "⭐";
+  const getIconByLevel = (level: number, type: 'wealth' | 'charm') => {
+      const icons = type === 'wealth' ? LEVEL_ICONS : CHARM_ICONS;
+      // Find icon for current level range (e.g. 10-19 uses index for 10)
+      const iconObj = [...icons].reverse().find(i => level >= i.min);
+      return iconObj || icons[0];
   };
 
   const renderContent = () => {
@@ -318,6 +318,15 @@ const App: React.FC = () => {
       case ViewState.PRIVATE_CHAT:
         if (!activeChat || !userProfile) return <div />;
         return <PrivateChatView language={language} onBack={() => setCurrentView(ViewState.MESSAGES)} currentUser={userProfile} chatSummary={activeChat} />;
+
+      case ViewState.AGENCY:
+        return userProfile ? (
+            <AgencyView
+                user={userProfile}
+                language={language}
+                onBack={() => setCurrentView(ViewState.PROFILE)}
+            />
+        ) : <div />;
 
       case ViewState.STORE:
         return userProfile ? (
@@ -363,7 +372,11 @@ const App: React.FC = () => {
         const isCustomId = isNaN(Number(userProfile.id));
         const adminRole = userProfile.adminRole;
 
-        const { level, progress, remaining } = getLevelInfo(userProfile.diamondsSpent || 0);
+        const wealthInfo = getLevelInfo(userProfile.diamondsSpent || 0);
+        const charmInfo = getLevelInfo(userProfile.diamondsReceived || 0);
+
+        const wealthIcon = getIconByLevel(wealthInfo.level, 'wealth');
+        const charmIcon = getIconByLevel(charmInfo.level, 'charm');
 
         return (
           <div className="h-full bg-gray-900 text-white overflow-y-auto pb-24 relative font-sans">
@@ -397,19 +410,39 @@ const App: React.FC = () => {
                  <h2 className={`text-2xl font-black flex items-center gap-2 mt-2 ${isEmperor ? 'text-red-500 animate-pulse drop-shadow-[0_0_10px_rgba(239,68,68,0.8)] tracking-wide' : 'text-white'}`}>
                     {userProfile.name}
                     {isOfficial && <BadgeCheck className="w-5 h-5 text-blue-500 fill-white" />}
+                 </h2>
+
+                 {/* Badges Row (Admin / VIP) */}
+                 <div className="flex items-center gap-2 mt-1">
+                    {adminRole && (
+                       <div className={`text-[10px] font-bold px-3 py-0.5 rounded-full border ${ADMIN_ROLES[adminRole].class}`}>
+                           {ADMIN_ROLES[adminRole].name[language]}
+                       </div>
+                    )}
                     {vipLvl > 0 && (
                         <span className={`px-2 py-0.5 rounded text-[10px] font-bold shadow ${vipInfo?.color} text-white`}>
                             {vipInfo?.badge} VIP {vipLvl}
                         </span>
                     )}
-                 </h2>
+                 </div>
                  
-                 <div className="flex items-center gap-3 mt-3">
+                 {/* Levels & ID Row */}
+                 <div className="flex flex-wrap justify-center items-center gap-3 mt-4">
+                    {/* Wealth Badge */}
+                    <div className={`flex items-center gap-1 px-2 py-1 rounded-full text-[10px] font-bold text-white shadow-md ${wealthIcon.color}`}>
+                        <span>{wealthIcon.icon}</span>
+                        <span>Lv.{wealthInfo.level}</span>
+                    </div>
+
+                    {/* Charm Badge */}
+                    <div className={`flex items-center gap-1 px-2 py-1 rounded-full text-[10px] font-bold text-white shadow-md ${charmIcon.color}`}>
+                        <span>{charmIcon.icon}</span>
+                        <span>Lv.{charmInfo.level}</span>
+                    </div>
+
+                    {/* ID Pill */}
                     <span className={`px-3 py-1 rounded-full text-xs flex items-center gap-1 border ${isCustomId ? 'bg-gradient-to-r from-yellow-600 to-yellow-400 text-black font-black border-yellow-200' : 'bg-black/40 border-white/10 text-brand-300'}`}>
                         {t('id')}: {userProfile.id} <Copy className="w-3 h-3 cursor-pointer" />
-                    </span>
-                    <span className="bg-gradient-to-r from-brand-600 to-accent-600 text-white px-3 py-1 rounded-full text-xs font-bold shadow-lg shadow-brand-500/20 border border-white/10 flex items-center gap-1">
-                        {getLevelIcon(level)} Lv.{level}
                     </span>
                  </div>
             </div>
@@ -434,18 +467,18 @@ const App: React.FC = () => {
                     <div className="flex justify-between items-end mb-2 relative z-10">
                          <div className="flex items-center gap-3">
                             <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-brand-600 to-brand-800 flex items-center justify-center text-white font-black text-lg shadow-inner border border-white/10">
-                                {getLevelIcon(level)}
+                                {wealthIcon.icon}
                             </div>
                             <div>
-                                <h3 className="text-sm font-bold text-white">{t('currentLevel')} {level}</h3>
+                                <h3 className="text-sm font-bold text-white">{t('currentLevel')} {wealthInfo.level}</h3>
                                 <p className="text-[10px] text-gray-400">
-                                    {t('expNeeded')} <span className="text-brand-400 font-bold">{remaining.toLocaleString()}</span> {t('diamonds')}
+                                    {t('expNeeded')} <span className="text-brand-400 font-bold">{wealthInfo.remaining.toLocaleString()}</span> {t('diamonds')}
                                 </p>
                             </div>
                          </div>
                     </div>
                     <div className="h-2.5 w-full bg-black/50 rounded-full overflow-hidden border border-white/5 relative z-10">
-                        <div className="h-full bg-gradient-to-r from-brand-500 via-accent-500 to-brand-300 transition-all duration-1000" style={{ width: `${progress}%` }}></div>
+                        <div className="h-full bg-gradient-to-r from-brand-500 via-accent-500 to-brand-300 transition-all duration-1000" style={{ width: `${wealthInfo.progress}%` }}></div>
                     </div>
                 </div>
 
@@ -498,6 +531,12 @@ const App: React.FC = () => {
                         <div onClick={() => setCurrentView(ViewState.ADMIN)} className="p-4 border-b border-white/5 flex justify-between items-center bg-red-900/10 hover:bg-red-900/20 transition cursor-pointer group">
                             <div className="flex items-center gap-3"><Shield className="w-5 h-5 text-red-500 transition group-hover:scale-110" /><span className="text-sm font-bold text-red-400">{t('admin')}</span></div>
                             <ChevronRight className="w-4 h-4 text-red-500 rtl:rotate-180" />
+                        </div>
+                    )}
+                    {userProfile.isAgent && (
+                        <div onClick={() => setCurrentView(ViewState.AGENCY)} className="p-4 border-b border-white/5 flex justify-between items-center bg-blue-900/10 hover:bg-blue-900/20 transition cursor-pointer group">
+                            <div className="flex items-center gap-3"><Database className="w-5 h-5 text-blue-500 transition group-hover:scale-110" /><span className="text-sm font-bold text-blue-400">{t('agency')}</span></div>
+                            <ChevronRight className="w-4 h-4 text-blue-500 rtl:rotate-180" />
                         </div>
                     )}
                     <div className="p-4 border-b border-white/5 flex justify-between items-center hover:bg-white/5 transition cursor-pointer group">
@@ -571,7 +610,7 @@ const App: React.FC = () => {
         {minimizedRoom && !activeRoom && <MiniRoomPlayer room={minimizedRoom} onMaximize={handleMaximizeRoom} onClose={() => setMinimizedRoom(null)} />}
       </main>
       
-      {currentView !== ViewState.ROOM && currentView !== ViewState.PRIVATE_CHAT && currentView !== ViewState.STORE && currentView !== ViewState.WALLET && currentView !== ViewState.VIP && currentView !== ViewState.ADMIN && currentView !== ViewState.GAMES && currentView !== ViewState.SEARCH && (
+      {currentView !== ViewState.ROOM && currentView !== ViewState.PRIVATE_CHAT && currentView !== ViewState.STORE && currentView !== ViewState.WALLET && currentView !== ViewState.VIP && currentView !== ViewState.ADMIN && currentView !== ViewState.GAMES && currentView !== ViewState.SEARCH && currentView !== ViewState.AGENCY && (
         <nav className="h-[80px] bg-gray-900 border-t border-white/5 flex justify-around items-center px-2 pb-2 z-50 relative safe-pb">
           <button onClick={() => setCurrentView(ViewState.HOME)} className={`flex flex-col items-center p-2 rounded-lg transition ${currentView === ViewState.HOME ? 'text-brand-500' : 'text-gray-500'}`}><Home className="w-6 h-6" /><span className="text-[10px] mt-1 font-bold">{t('home')}</span></button>
           

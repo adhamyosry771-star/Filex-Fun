@@ -8,6 +8,7 @@ export const CURRENT_USER: User = {
   avatar: 'https://picsum.photos/seed/me/200/200',
   level: 12,
   diamondsSpent: 154000,
+  diamondsReceived: 50000,
   vip: true,
   vipLevel: 1,
   wallet: {
@@ -22,6 +23,34 @@ export const CURRENT_USER: User = {
   followingCount: 120,
   visitorsCount: 3400
 };
+
+export const LEVEL_ICONS = [
+    { min: 0, icon: '🛡️', color: 'bg-gray-500' },
+    { min: 10, icon: '⚔️', color: 'bg-blue-500' },
+    { min: 20, icon: '💎', color: 'bg-cyan-500' },
+    { min: 30, icon: '👑', color: 'bg-purple-500' },
+    { min: 40, icon: '🌟', color: 'bg-yellow-500' },
+    { min: 50, icon: '🔥', color: 'bg-orange-500' },
+    { min: 60, icon: '🦁', color: 'bg-red-500' },
+    { min: 70, icon: '🐲', color: 'bg-red-700' },
+    { min: 80, icon: '⚡', color: 'bg-amber-400' },
+    { min: 90, icon: '🔱', color: 'bg-rose-600' },
+    { min: 100, icon: '🪐', color: 'bg-indigo-600' },
+];
+
+export const CHARM_ICONS = [
+    { min: 0, icon: '💙', color: 'bg-blue-400' },
+    { min: 10, icon: '💖', color: 'bg-pink-400' },
+    { min: 20, icon: '🌹', color: 'bg-rose-500' },
+    { min: 30, icon: '🦋', color: 'bg-purple-400' },
+    { min: 40, icon: '🦄', color: 'bg-fuchsia-500' },
+    { min: 50, icon: '🌈', color: 'bg-sky-400' },
+    { min: 60, icon: '🎸', color: 'bg-red-500' },
+    { min: 70, icon: '🎤', color: 'bg-indigo-500' },
+    { min: 80, icon: '💃', color: 'bg-pink-600' },
+    { min: 90, icon: '🧞', color: 'bg-violet-600' },
+    { min: 100, icon: '🧜‍♀️', color: 'bg-cyan-500' },
+];
 
 export const ROOM_BACKGROUNDS = [
   'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?q=80&w=600&auto=format&fit=crop',
@@ -137,14 +166,14 @@ export const ADMIN_ROLES = {
 };
 
 export const VIP_TIERS: VipTier[] = [
-  { level: 1, name: { ar: 'برونزي', en: 'Bronze' }, color: 'bg-amber-700', textColor: 'text-amber-200', badge: '🥉', discount: 2, price: 1000, features: { ar: ['شارة VIP 1', 'دخول مميز'], en: ['VIP 1 Badge', 'Special Entry'] } },
-  { level: 2, name: { ar: 'فضي', en: 'Silver' }, color: 'bg-gray-400', textColor: 'text-gray-100', badge: '🥈', discount: 5, price: 5000, features: { ar: ['شارة VIP 2', 'خصم 5%'], en: ['VIP 2 Badge', '5% Discount'] } },
-  { level: 3, name: { ar: 'ذهبي', en: 'Gold' }, color: 'bg-yellow-600', textColor: 'text-yellow-100', badge: '🥇', discount: 8, price: 20000, features: { ar: ['شارة VIP 3', 'خصم 8%'], en: ['VIP 3 Badge', '8% Discount'] } },
-  { level: 4, name: { ar: 'بلاتينيوم', en: 'Platinum' }, color: 'bg-cyan-600', textColor: 'text-cyan-100', badge: '💠', discount: 10, price: 50000, features: { ar: ['شارة VIP 4', 'خصم 10%'], en: ['VIP 4 Badge', '10% Discount'] } },
-  { level: 5, name: { ar: 'ماسي', en: 'Diamond' }, color: 'bg-blue-600', textColor: 'text-blue-100', badge: '💎', discount: 15, price: 100000, features: { ar: ['شارة VIP 5', 'دخول مخفي'], en: ['VIP 5 Badge', 'Hidden Entry'] } },
-  { level: 6, name: { ar: 'ملك', en: 'King' }, color: 'bg-purple-600', textColor: 'text-purple-100', badge: '👑', discount: 20, price: 250000, features: { ar: ['شارة الملك', 'طرد المستخدمين'], en: ['King Badge', 'Kick Users'] } },
-  { level: 7, name: { ar: 'أسطورة', en: 'Legend' }, color: 'bg-pink-600', textColor: 'text-pink-100', badge: '🦄', discount: 25, price: 500000, features: { ar: ['شارة الأسطورة', 'حظر المستخدمين'], en: ['Legend Badge', 'Ban Users'] } },
-  { level: 8, name: { ar: 'إمبراطور', en: 'Emperor' }, color: 'bg-gradient-to-r from-red-600 to-red-900', textColor: 'text-red-500 font-black animate-pulse drop-shadow-[0_0_8px_rgba(239,68,68,0.8)]', badge: '🔱', discount: 30, price: 1000000, features: { ar: ['اسم أحمر متوهج', 'سلطة مطلقة', 'هدايا حصرية'], en: ['Red Glowing Name', 'Absolute Power', 'Exclusive Gifts'] } },
+  { level: 1, name: { ar: 'برونزي', en: 'Bronze' }, color: 'bg-amber-700', textColor: 'text-amber-200', badge: '🥉', discount: 2, price: 1000000, features: { ar: ['شارة VIP 1', 'دخول مميز'], en: ['VIP 1 Badge', 'Special Entry'] } },
+  { level: 2, name: { ar: 'فضي', en: 'Silver' }, color: 'bg-gray-400', textColor: 'text-gray-100', badge: '🥈', discount: 5, price: 5000000, features: { ar: ['شارة VIP 2', 'خصم 5%'], en: ['VIP 2 Badge', '5% Discount'] } },
+  { level: 3, name: { ar: 'ذهبي', en: 'Gold' }, color: 'bg-yellow-600', textColor: 'text-yellow-100', badge: '🥇', discount: 8, price: 10000000, features: { ar: ['شارة VIP 3', 'خصم 8%'], en: ['VIP 3 Badge', '8% Discount'] } },
+  { level: 4, name: { ar: 'بلاتينيوم', en: 'Platinum' }, color: 'bg-cyan-600', textColor: 'text-cyan-100', badge: '💠', discount: 10, price: 20000000, features: { ar: ['شارة VIP 4', 'خصم 10%'], en: ['VIP 4 Badge', '10% Discount'] } },
+  { level: 5, name: { ar: 'ماسي', en: 'Diamond' }, color: 'bg-blue-600', textColor: 'text-blue-100', badge: '💎', discount: 15, price: 50000000, features: { ar: ['شارة VIP 5', 'دخول مخفي'], en: ['VIP 5 Badge', 'Hidden Entry'] } },
+  { level: 6, name: { ar: 'ملك', en: 'King' }, color: 'bg-purple-600', textColor: 'text-purple-100', badge: '👑', discount: 20, price: 100000000, features: { ar: ['شارة الملك', 'طرد المستخدمين'], en: ['King Badge', 'Kick Users'] } },
+  { level: 7, name: { ar: 'أسطورة', en: 'Legend' }, color: 'bg-pink-600', textColor: 'text-pink-100', badge: '🦄', discount: 25, price: 250000000, features: { ar: ['شارة الأسطورة', 'حظر المستخدمين'], en: ['Legend Badge', 'Ban Users'] } },
+  { level: 8, name: { ar: 'إمبراطور', en: 'Emperor' }, color: 'bg-gradient-to-r from-red-600 to-red-900', textColor: 'text-red-500 font-black animate-pulse drop-shadow-[0_0_8px_rgba(239,68,68,0.8)]', badge: '🔱', discount: 30, price: 500000000, features: { ar: ['اسم أحمر متوهج', 'سلطة مطلقة', 'هدايا حصرية'], en: ['Red Glowing Name', 'Absolute Power', 'Exclusive Gifts'] } },
 ];
 
 export const GIFTS: Gift[] = [

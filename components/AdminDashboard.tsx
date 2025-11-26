@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { Shield, Trash2, Ban, Search, Gift, Crown, ArrowLeft, RefreshCw, CheckCircle, Megaphone, Edit3, Send, Home, XCircle, Flame, Star, Image as ImageIcon, Plus, X } from 'lucide-react';
+import { Shield, Trash2, Ban, Search, Gift, Crown, ArrowLeft, RefreshCw, CheckCircle, Megaphone, Edit3, Send, Home, XCircle, Flame, Star, Image as ImageIcon, Plus, X, Database } from 'lucide-react';
 import { getAllUsers, adminUpdateUser, deleteAllRooms, sendSystemNotification, broadcastOfficialMessage, searchUserByDisplayId, getRoomByHostId, adminBanRoom, deleteRoom, toggleRoomHotStatus, addBanner, deleteBanner, listenToBanners } from '../services/firebaseService';
 import { Language, User, Room, Banner } from '../types';
 import { VIP_TIERS, ADMIN_ROLES } from '../constants';
@@ -184,6 +184,60 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, language }) => 
       }
       setActionLoading(null);
   };
+
+  // --- AGENCY LOGIC ---
+  const handleAssignAgent = async (uid: string) => {
+      if (!confirm("تعيين هذا المستخدم كوكيل شحن؟ سيتم إضافة 200,000,000 ماسة لرصيد الوكالة.")) return;
+      setActionLoading(uid);
+      try {
+          await adminUpdateUser(uid, { isAgent: true, agencyBalance: 200000000 });
+          await sendSystemNotification(uid, "مبروك!", "تم تعيينك كوكيل شحن معتمد. تم إضافة 200 مليون ماسة لرصيد وكالتك.");
+          if (searchedUser && searchedUser.uid === uid) {
+              setSearchedUser({...searchedUser, isAgent: true, agencyBalance: 200000000});
+          }
+          await fetchUsers();
+          alert("تم التعيين بنجاح");
+      } catch (e) { alert("فشل التعيين"); }
+      setActionLoading(null);
+  };
+
+  const handleRevokeAgent = async (uid: string) => {
+      if (!confirm("سحب الوكالة من هذا المستخدم؟")) return;
+      setActionLoading(uid);
+      try {
+          await adminUpdateUser(uid, { isAgent: false, agencyBalance: 0 });
+          await sendSystemNotification(uid, "تنبيه", "تم سحب صلاحيات وكالة الشحن منك.");
+          if (searchedUser && searchedUser.uid === uid) {
+              setSearchedUser({...searchedUser, isAgent: false, agencyBalance: 0});
+          }
+          await fetchUsers();
+          alert("تم السحب بنجاح");
+      } catch (e) { alert("فشل السحب"); }
+      setActionLoading(null);
+  };
+
+  const handleRechargeAgency = async (uid: string) => {
+      const amountStr = prompt("أدخل كمية الشحن للوكالة:");
+      if (!amountStr) return;
+      const amount = parseInt(amountStr);
+      if (isNaN(amount)) return;
+
+      setActionLoading(uid);
+      try {
+          const user = users.find(u => u.uid === uid) || searchedUser;
+          const current = user?.agencyBalance || 0;
+          await adminUpdateUser(uid, { agencyBalance: current + amount });
+          await sendSystemNotification(uid, "شحن الوكالة", `تم إضافة ${amount} لرصيد وكالتك.`);
+          
+          if (searchedUser && searchedUser.uid === uid) {
+              setSearchedUser({...searchedUser, agencyBalance: current + amount});
+          }
+          await fetchUsers();
+          alert("تم شحن الوكالة");
+      } catch (e) { alert("فشل الشحن"); }
+      setActionLoading(null);
+  };
+
 
   const handleSelectVip = async (level: number) => {
       if (!showVipModal) return;
@@ -377,6 +431,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, language }) => 
                                               <div className="text-xs text-gray-500">ID: {searchedUser.id}</div>
                                           </div>
                                           {searchedUser.isBanned && <span className="mr-auto bg-red-600 text-white text-[10px] px-2 py-1 rounded font-bold">محظور</span>}
+                                          {searchedUser.isAgent && <span className="mr-auto bg-blue-600 text-white text-[10px] px-2 py-1 rounded font-bold flex items-center gap-1"><Database className="w-3 h-3"/> وكيل</span>}
                                       </div>
                                       <div className="grid grid-cols-2 gap-2">
                                           <button onClick={() => setShowGiftModal(searchedUser.uid!)} className="bg-blue-900/30 text-blue-400 py-1.5 rounded text-xs flex items-center justify-center gap-1"><Gift className="w-3 h-3"/> شحن</button>
@@ -385,6 +440,26 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, language }) => 
                                           <button onClick={() => handleBanUser(searchedUser.uid!, searchedUser.isBanned || false)} disabled={searchedUser.id === 'OFFECAL'} className={`py-1.5 rounded text-xs flex items-center justify-center gap-1 ${searchedUser.isBanned ? 'bg-green-600 text-white' : 'bg-red-600 text-white'}`}>
                                               {searchedUser.isBanned ? 'فك الحظر' : 'حظر الحساب'}
                                           </button>
+                                      </div>
+
+                                      {/* Agency Controls */}
+                                      <div className="mt-2 pt-2 border-t border-gray-800">
+                                          {searchedUser.isAgent ? (
+                                              <div className="space-y-2">
+                                                  <div className="flex justify-between text-xs text-blue-300">
+                                                      <span>رصيد الوكالة:</span>
+                                                      <span className="font-bold">{searchedUser.agencyBalance?.toLocaleString()} 💎</span>
+                                                  </div>
+                                                  <div className="flex gap-2">
+                                                      <button onClick={() => handleRechargeAgency(searchedUser.uid!)} className="flex-1 bg-blue-600/20 text-blue-400 border border-blue-600 py-1 rounded text-xs">شحن وكالة</button>
+                                                      <button onClick={() => handleRevokeAgent(searchedUser.uid!)} className="flex-1 bg-red-600/20 text-red-400 border border-red-600 py-1 rounded text-xs">سحب وكالة</button>
+                                                  </div>
+                                              </div>
+                                          ) : (
+                                              <button onClick={() => handleAssignAgent(searchedUser.uid!)} className="w-full bg-blue-600 text-white py-1.5 rounded text-xs font-bold flex items-center justify-center gap-2">
+                                                  <Database className="w-3 h-3" /> تعيين كوكيل شحن
+                                              </button>
+                                          )}
                                       </div>
                                       
                                       {/* Role Management */}
@@ -445,6 +520,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, language }) => 
                                                   {user.adminRole === 'super_admin' ? 'Super Admin' : 'Admin'}
                                               </span>
                                           )}
+                                          {user.isAgent && <span className="text-[8px] bg-blue-600 text-white px-1 rounded font-bold">وكيل</span>}
                                       </div>
                                       <div className="text-[10px] text-gray-500 font-mono">ID: {user.id}</div>
                                       <div className="text-[10px] text-cyan-400 font-bold">💎 {user.wallet?.diamonds || 0}</div>

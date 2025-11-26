@@ -191,7 +191,9 @@ import {
       isAdmin: isSystemAdmin,
       adminRole: isSystemAdmin ? 'super_admin' : null,
       isBanned: false,
-      wallet: isSystemAdmin ? { diamonds: 999999999, coins: 999999999 } : { diamonds: 0, coins: 0 }
+      wallet: isSystemAdmin ? { diamonds: 999999999, coins: 999999999 } : { diamonds: 0, coins: 0 },
+      diamondsSpent: 0,
+      diamondsReceived: 0
     };
   
     try {
@@ -899,7 +901,7 @@ import {
           });
           callback(banners);
       }, (e) => {
-          console.log("Banner fetch fallback (requires index usually)");
+          console.log("Banner fetch fallback");
           const q2 = query(collection(db, "banners"));
           onSnapshot(q2, (snap) => {
               const b: Banner[] = [];
@@ -907,4 +909,63 @@ import {
               callback(b);
           });
       });
+  };
+
+  // --- AGENCY SYSTEM ---
+
+  export const transferAgencyDiamonds = async (agentUid: string, targetDisplayId: string, amount: number) => {
+      try {
+          // Find Target User by Display ID
+          const usersRef = collection(db, "users");
+          const q = query(usersRef, where("id", "==", targetDisplayId));
+          const querySnapshot = await getDocs(q);
+          
+          if (querySnapshot.empty) {
+              throw new Error("User not found");
+          }
+          const targetUserDoc = querySnapshot.docs[0];
+          const targetUid = targetUserDoc.id;
+
+          await runTransaction(db, async (transaction) => {
+              // Get Agent
+              const agentRef = doc(db, "users", agentUid);
+              const agentDoc = await transaction.get(agentRef);
+              if (!agentDoc.exists()) throw new Error("Agent not found");
+              
+              const agentData = agentDoc.data() as User;
+              if (!agentData.isAgent) throw new Error("User is not an agent");
+              
+              const currentBalance = agentData.agencyBalance || 0;
+              if (currentBalance < amount) throw new Error("Insufficient agency balance");
+
+              // Get Target
+              const targetRef = doc(db, "users", targetUid);
+              const targetDoc = await transaction.get(targetRef);
+              if (!targetDoc.exists()) throw new Error("Target user error");
+              const targetData = targetDoc.data() as User;
+
+              // Update Agent
+              transaction.update(agentRef, {
+                  agencyBalance: currentBalance - amount
+              });
+
+              // Update Target
+              const currentDiamonds = targetData.wallet?.diamonds || 0;
+              transaction.update(targetRef, {
+                  "wallet.diamonds": currentDiamonds + amount
+              });
+              
+              // Log transaction (Optional: create collection 'agency_logs')
+              const logRef = doc(collection(db, "agency_logs"));
+              transaction.set(logRef, {
+                  agentId: agentData.id,
+                  targetId: targetData.id,
+                  amount: amount,
+                  timestamp: Date.now()
+              });
+          });
+      } catch (e: any) {
+          console.error("Agency Transfer Error:", e.message || "Unknown");
+          throw new Error(e.message || "Transfer failed");
+      }
   };

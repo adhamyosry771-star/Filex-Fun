@@ -638,7 +638,8 @@ import {
               isAiHost: false,
               seats: seats,
               isBanned: false,
-              isHot: false
+              isHot: false,
+              contributors: {}
           };
 
           await setDoc(doc(db, "rooms", roomId), newRoom);
@@ -663,6 +664,19 @@ import {
       });
       callback(rooms);
     });
+  };
+
+  export const listenToRoom = (roomId: string, callback: (room: Room | null) => void): Unsubscribe => {
+      const roomRef = doc(db, "rooms", roomId);
+      return onSnapshot(roomRef, (docSnap) => {
+          if (docSnap.exists()) {
+              callback({ id: docSnap.id, ...docSnap.data() } as Room);
+          } else {
+              callback(null);
+          }
+      }, (error) => {
+          console.error("Listen to room error:", error);
+      });
   };
 
   export const incrementViewerCount = async (roomId: string) => {
@@ -849,18 +863,37 @@ import {
                   throw new Error("Insufficient funds");
               }
 
+              // Update Sender Balance
               transaction.update(userRef, {
                   "wallet.diamonds": currentDiamonds - cost,
                   "diamondsSpent": currentSpent + cost
               });
 
+              // Update Seat Gift Count
               const updatedSeats = [...seats];
               updatedSeats[targetSeatIndex] = {
                   ...targetSeat,
                   giftCount: (targetSeat.giftCount || 0) + 1
               };
 
-              transaction.update(roomRef, { seats: updatedSeats });
+              // Update Contributors (Leaderboard)
+              // We use a map for O(1) read/write
+              const currentContributors = roomData.contributors || {};
+              const senderId = userData.id || 'unknown'; 
+              const currentAmount = currentContributors[senderId]?.amount || 0;
+
+              // We reconstruct the contributor object to ensure it has latest avatar/name
+              const newContributors = {
+                  ...currentContributors,
+                  [senderId]: {
+                      userId: senderId,
+                      name: userData.name,
+                      avatar: userData.avatar,
+                      amount: currentAmount + cost
+                  }
+              };
+
+              transaction.update(roomRef, { seats: updatedSeats, contributors: newContributors });
           });
       } catch (error: any) {
           console.error("Gift transaction failed:", error.message || "Unknown");

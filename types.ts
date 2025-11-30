@@ -110,6 +110,13 @@ export interface RoomSeat {
   adminRole?: 'super_admin' | 'admin' | null;
 }
 
+export interface Contributor {
+  userId: string;
+  name: string;
+  avatar: string;
+  amount: number;
+}
+
 export interface Room {
   id: string;
   displayId: string;
@@ -126,6 +133,7 @@ export interface Room {
   isBanned?: boolean;
   isHot?: boolean;
   isOfficial?: boolean;
+  contributors?: Record<string, Contributor>;
 }
 
 export interface Banner {

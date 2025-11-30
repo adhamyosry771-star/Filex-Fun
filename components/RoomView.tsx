@@ -1,10 +1,11 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { ArrowLeft, Send, Heart, Share2, Gift as GiftIcon, Users, Crown, Mic, MicOff, Lock, Unlock, Settings, Image as ImageIcon, X, Info, Minimize2, LogOut, Check, BadgeCheck, MoreHorizontal, User as UserIcon, Loader2, Upload, Shield, Trophy } from 'lucide-react';
+import { ArrowLeft, Send, Heart, Share2, Gift as GiftIcon, Users, Crown, Mic, MicOff, Lock, Unlock, Settings, Image as ImageIcon, X, Info, Minimize2, LogOut, BadgeCheck, Loader2, Upload, Shield, Trophy, Bot, Volume2, VolumeX, Megaphone } from 'lucide-react';
 import { Room, ChatMessage, Gift, Language, User, RoomSeat } from '../types';
 import { GIFTS, STORE_ITEMS, ROOM_BACKGROUNDS, VIP_TIERS, ADMIN_ROLES } from '../constants';
-import { listenToMessages, sendMessage, takeSeat, leaveSeat, updateRoomDetails, sendGiftTransaction, toggleSeatLock, toggleSeatMute, decrementViewerCount } from '../services/firebaseService';
-import { joinVoiceChannel, leaveVoiceChannel, toggleMicMute } from '../services/agoraService';
+import { listenToMessages, sendMessage, takeSeat, leaveSeat, updateRoomDetails, sendGiftTransaction, toggleSeatLock, toggleSeatMute, decrementViewerCount, listenToRoom } from '../services/firebaseService';
+import { joinVoiceChannel, leaveVoiceChannel, toggleMicMute, publishMicrophone, unpublishMicrophone, toggleAllRemoteAudio } from '../services/agoraService';
+import { generateAiHostResponse } from '../services/geminiService';
 import UserProfileModal from './UserProfileModal';
 import RoomLeaderboard from './RoomLeaderboard';
 
@@ -15,7 +16,10 @@ interface RoomViewProps {
   language: Language;
 }
 
-const RoomView: React.FC<RoomViewProps> = ({ room, currentUser, onAction, language }) => {
+export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUser, onAction, language }) => {
+  // Use local state to track room updates in real-time (seats, contributors, etc.)
+  const [room, setRoom] = useState<Room>(initialRoom);
+  
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputValue, setInputValue] = useState('');
   const [showGiftPanel, setShowGiftPanel] = useState(false);
@@ -26,13 +30,18 @@ const RoomView: React.FC<RoomViewProps> = ({ room, currentUser, onAction, langua
   
   const [selectedUser, setSelectedUser] = useState<RoomSeat | null>(null);
   const [seatToConfirm, setSeatToConfirm] = useState<number | null>(null);
-  const [loadingSeatIndex, setLoadingSeatIndex] = useState<number | null>(null); // New state for specific seat loading
+  const [loadingSeatIndex, setLoadingSeatIndex] = useState<number | null>(null);
   const [giftTarget, setGiftTarget] = useState<'all' | 'me' | string>('all'); 
   const [floatingHearts, setFloatingHearts] = useState<{id: number, left: number}[]>([]);
   
   const [editTitle, setEditTitle] = useState(room.title);
   const [editDesc, setEditDesc] = useState(room.description || '');
-  const [customBg, setCustomBg] = useState<string | null>(null);
+  
+  // Audio State
+  const [isSpeakerMuted, setIsSpeakerMuted] = useState(false);
+
+  // AI Host Toggle
+  const [isAiEnabled, setIsAiEnabled] = useState(room.isAiHost || false);
 
   // Loading States
   const [isSendingGift, setIsSendingGift] = useState(false);
@@ -43,43 +52,68 @@ const RoomView: React.FC<RoomViewProps> = ({ room, currentUser, onAction, langua
   const [joinTimestamp] = useState<number>(Date.now());
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
+  // Refs for stable callbacks
+  const currentUserRef = useRef(currentUser);
+  useEffect(() => { currentUserRef.current = currentUser; }, [currentUser]);
+
   const isHost = room.hostId === currentUser.id;
   const seats = room.seats || Array(11).fill(null).map((_, i) => ({ index: i, userId: null, giftCount: 0 }));
 
-  // --- AGORA AUDIO LOGIC ---
-  // Check if I am seated to connect audio
+  // --- LISTEN TO ROOM UPDATES (REAL-TIME LEADERBOARD & SEATS) ---
+  useEffect(() => {
+      const unsubscribe = listenToRoom(initialRoom.id, (updatedRoom) => {
+          if (updatedRoom) {
+              setRoom(updatedRoom);
+              // Sync local edit states if needed, or keep them independent while editing
+              if (!showRoomSettings) {
+                  setEditTitle(updatedRoom.title);
+                  setEditDesc(updatedRoom.description || '');
+                  setIsAiEnabled(updatedRoom.isAiHost || false);
+              }
+          } else {
+              // Room deleted
+              onAction('leave');
+          }
+      });
+      return () => unsubscribe();
+  }, [initialRoom.id, onAction, showRoomSettings]);
+
+
+  // --- AGORA AUDIO LOGIC (REAL VOICE INTEGRATION) ---
+  
+  // 1. Join Room as Audience (Listener) on mount
+  useEffect(() => {
+      const uid = currentUserRef.current.uid || currentUserRef.current.id;
+      // Connect to Agora immediately to hear others
+      if (uid) {
+          joinVoiceChannel(room.id, uid);
+      }
+      
+      // Cleanup on unmount (leave room)
+      return () => {
+          leaveVoiceChannel();
+      };
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [room.id]); 
+
+  // 2. Handle Seat Changes (Switch between Audience <-> Speaker)
   useEffect(() => {
       const mySeat = seats.find(s => s.userId === currentUser.id);
+      
       if (mySeat) {
-          // User is seated, connect audio
-          joinVoiceChannel(room.id, currentUser.uid || currentUser.id);
-          toggleMicMute(mySeat.isMuted);
+          // User is in a seat -> Become Speaker
+          publishMicrophone(mySeat.isMuted);
           
-          // Ensure loading spinner is cleared if I'm successfully seated
           if (loadingSeatIndex === mySeat.index) {
               setLoadingSeatIndex(null);
           }
       } else {
-          // User is not seated, leave channel
-          leaveVoiceChannel();
+          // User is NOT in a seat -> Become Audience (Stop publishing, keep listening)
+          unpublishMicrophone();
       }
+  }, [seats, currentUser.id, loadingSeatIndex]);
 
-      return () => {
-          // Cleanup handled elsewhere
-      };
-  }, [seats, currentUser.id, currentUser.uid, room.id]);
-
-  // Clear loading if seat becomes occupied by someone else
-  useEffect(() => {
-      if (loadingSeatIndex !== null) {
-          const seat = seats.find(s => s.index === loadingSeatIndex);
-          if (seat && seat.userId) {
-              setLoadingSeatIndex(null);
-          }
-      }
-  }, [seats, loadingSeatIndex]);
-
-  // Sync Mute State
+  // 3. Handle Local Mute State updates from seat
   useEffect(() => {
       const mySeat = seats.find(s => s.userId === currentUser.id);
       if (mySeat) {
@@ -87,11 +121,48 @@ const RoomView: React.FC<RoomViewProps> = ({ room, currentUser, onAction, langua
       }
   }, [seats, currentUser.id]);
 
+  // --- AI HOST LOGIC ---
+  useEffect(() => {
+      if (!isHost || !isAiEnabled || messages.length === 0) return;
+
+      const lastMsg = messages[messages.length - 1];
+      const isRecent = Date.now() - lastMsg.timestamp < 10000; 
+      if (!isRecent || lastMsg.userId === 'AI_HOST' || lastMsg.userId === currentUser.id) return;
+
+      const triggerAiResponse = async () => {
+          try {
+              await new Promise(r => setTimeout(r, 2000));
+              const aiText = await generateAiHostResponse(
+                  lastMsg.text,
+                  room.title + (room.description ? `: ${room.description}` : ''),
+                  lastMsg.userName
+              );
+
+              const aiMsg: ChatMessage = {
+                  id: Date.now().toString(),
+                  userId: 'AI_HOST',
+                  userName: 'AI Assistant 🤖',
+                  userAvatar: 'https://api.dicebear.com/7.x/bottts/svg?seed=Felix',
+                  text: aiText,
+                  timestamp: Date.now(),
+                  vipLevel: 0
+              };
+              await sendMessage(room.id, aiMsg);
+          } catch (e) { console.error("AI Host Error:", e); }
+      };
+      triggerAiResponse();
+  }, [messages, isHost, isAiEnabled, room.id, currentUser.id]);
+
 
   const t = (key: string) => {
     const dict: Record<string, { ar: string, en: string }> = {
       placeholder: { ar: 'اكتب رسالة...', en: 'Type a message...' },
       pinned: { ar: 'أهلاً بك في فليكس فن! يرجى الالتزام بالاحترام المتبادل.', en: 'Welcome to Flex Fun!' },
+      appRules: { 
+          ar: 'مرحباً في Flex Fun! 🛡️ يرجى الالتزام بالاحترام المتبادل. ممنوع السب، الشتم، أو الكلام المسيء. نحن مجتمع راقٍ للمتعة والتواصل. 🌟', 
+          en: 'Welcome to Flex Fun! 🛡️ Please maintain mutual respect. No insults, cursing, or abusive language. We are a classy community for fun & connection. 🌟' 
+      },
+      roomInfo: { ar: 'وصف الغرفة:', en: 'Room Info:' },
       sendTo: { ar: 'إرسال إلى:', en: 'Send to:' },
       everyone: { ar: 'الجميع', en: 'Everyone' },
       me: { ar: 'نفسي', en: 'Myself' },
@@ -104,12 +175,8 @@ const RoomView: React.FC<RoomViewProps> = ({ room, currentUser, onAction, langua
       yes: { ar: 'نعم', en: 'Yes' },
       cancel: { ar: 'إلغاء', en: 'Cancel' },
       lockedMsg: { ar: 'هذا المقعد مغلق من قبل المضيف', en: 'This seat is locked by the host' },
-      alreadySeated: { ar: 'أنت جالس بالفعل', en: 'You are already seated' },
       lock: { ar: 'قفل', en: 'Lock' },
       unlock: { ar: 'فتح القفل', en: 'Unlock' },
-      mute: { ar: 'كتم الصوت', en: 'Mute User' },
-      unmute: { ar: 'إلغاء الكتم', en: 'Unmute' },
-      viewProfile: { ar: 'عرض الملف', en: 'View Profile' },
       loginReq: { ar: 'يرجى تسجيل الدخول أولاً', en: 'Please login first' },
       roomSettings: { ar: 'إعدادات الغرفة', en: 'Room Settings' },
       roomDesc: { ar: 'وصف الغرفة / القوانين', en: 'Room Rules / Description' },
@@ -119,7 +186,8 @@ const RoomView: React.FC<RoomViewProps> = ({ room, currentUser, onAction, langua
       welcome: { ar: 'مرحباً بك في الغرفة!', en: 'Welcome to the room!' },
       activeUsers: { ar: 'المتصلين الآن', en: 'Online Users' },
       uploadBg: { ar: 'رفع خلفية', en: 'Upload Background' },
-      takingSeat: { ar: 'جاري الصعود...', en: 'Taking Seat...' }
+      aiHost: { ar: 'المضيف الذكي', en: 'AI Host' },
+      aiHostDesc: { ar: 'تفعيل الرد التلقائي الذكي على الرسائل', en: 'Enable smart AI auto-reply to chat' }
     };
     return dict[key][language];
   };
@@ -152,13 +220,6 @@ const RoomView: React.FC<RoomViewProps> = ({ room, currentUser, onAction, langua
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  useEffect(() => {
-      if (room) {
-          setEditTitle(room.title);
-          setEditDesc(room.description || '');
-      }
-  }, [room]);
-
   const handleSendMessage = async () => {
     if (!inputValue.trim()) return;
 
@@ -177,9 +238,7 @@ const RoomView: React.FC<RoomViewProps> = ({ room, currentUser, onAction, langua
     setInputValue('');
     try {
         await sendMessage(room.id, userMsg);
-    } catch (e: any) { 
-        // silenced
-    }
+    } catch (e: any) { }
   };
 
   const handleSendGift = async (gift: Gift) => {
@@ -214,7 +273,9 @@ const RoomView: React.FC<RoomViewProps> = ({ room, currentUser, onAction, langua
     }
 
     try {
+        // Here we pass currentUser to record them as a contributor
         await sendGiftTransaction(room.id, currentUser.uid, targetSeatIndex, gift.cost);
+        
         const giftMsg: ChatMessage = {
           id: Date.now().toString(),
           userId: currentUser.id,
@@ -259,8 +320,6 @@ const RoomView: React.FC<RoomViewProps> = ({ room, currentUser, onAction, langua
           return;
       }
       
-      // If user is already seated, they can move seats now.
-      
       if (isLocked && !isHost) {
           alert(t('lockedMsg'));
           return;
@@ -270,16 +329,14 @@ const RoomView: React.FC<RoomViewProps> = ({ room, currentUser, onAction, langua
 
   const confirmTakeSeat = async () => {
       if (seatToConfirm === null) return;
-      
       const index = seatToConfirm;
-      setSeatToConfirm(null); // Close modal immediately for better UX
-      setLoadingSeatIndex(index); // Show loading on specific seat
+      setSeatToConfirm(null); 
+      setLoadingSeatIndex(index); 
 
       try {
           await takeSeat(room.id, index, currentUser);
-          // Audio join is triggered by useEffect when seat update arrives
       } catch (e: any) {
-          setLoadingSeatIndex(null); // Stop loading on error
+          setLoadingSeatIndex(null); 
           const msg = typeof e === 'string' ? e : (e.message || '');
           if (msg === 'Seat is locked') alert(t('lockedMsg'));
           else alert("Failed to take seat. Please try again.");
@@ -297,21 +354,20 @@ const RoomView: React.FC<RoomViewProps> = ({ room, currentUser, onAction, langua
   };
 
   const handleUpdateRoom = async (bg: string) => {
-      await updateRoomDetails(room.id, { title: editTitle, thumbnail: bg, description: editDesc });
+      await updateRoomDetails(room.id, { 
+          title: editTitle, 
+          thumbnail: bg, 
+          description: editDesc,
+          isAiHost: isAiEnabled 
+      });
       setShowRoomSettings(false);
   };
 
   const handleLeaveRoomAction = async () => {
-      // Logic to remove user from seat if they leave permanently
       await leaveSeat(room.id, currentUser);
-      leaveVoiceChannel(); // Disconnect audio
+      leaveVoiceChannel();
       await decrementViewerCount(room.id);
       onAction('leave');
-  };
-
-  const handleMuteUser = async () => {
-      if (!selectedUser || !isHost) return;
-      await toggleSeatMute(room.id, selectedUser.index, !selectedUser.isMuted);
   };
 
   const handleToggleMyMute = async () => {
@@ -319,6 +375,12 @@ const RoomView: React.FC<RoomViewProps> = ({ room, currentUser, onAction, langua
       if (mySeat) {
           await toggleSeatMute(room.id, mySeat.index, !mySeat.isMuted);
       }
+  };
+
+  const handleToggleSpeaker = () => {
+      const newState = !isSpeakerMuted;
+      setIsSpeakerMuted(newState);
+      toggleAllRemoteAudio(newState);
   };
 
   const handleCustomBgUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -369,7 +431,7 @@ const RoomView: React.FC<RoomViewProps> = ({ room, currentUser, onAction, langua
           </div>
       )}
 
-      {/* 2. HEADER - Updated Layout & Z-Index */}
+      {/* 2. HEADER */}
       <div className="relative z-50 pt-safe-top px-4 pb-2 flex justify-between items-center bg-gradient-to-b from-black/80 to-transparent">
         <div className="flex items-center gap-3">
             <button onClick={() => setShowExitModal(true)} className="p-2 bg-white/10 rounded-full hover:bg-white/20 backdrop-blur transition border border-white/5">
@@ -386,13 +448,12 @@ const RoomView: React.FC<RoomViewProps> = ({ room, currentUser, onAction, langua
             </div>
         </div>
         <div className="flex gap-2">
-            {/* Room Leaderboard Button */}
             <button 
               onClick={() => setShowLeaderboard(true)} 
               className="bg-gradient-to-r from-yellow-600 to-yellow-400 backdrop-blur px-3 py-1.5 rounded-full text-xs font-black text-black flex items-center gap-1 border border-yellow-300 hover:scale-105 transition shadow-lg shadow-yellow-500/30"
             >
                 <Trophy className="w-3 h-3 fill-black" />
-                Cup
+                الكأس
             </button>
 
             {isHost && (
@@ -473,9 +534,17 @@ const RoomView: React.FC<RoomViewProps> = ({ room, currentUser, onAction, langua
       {/* 4. CHAT AREA */}
       <div className="relative z-20 flex-1 flex flex-col min-h-[45%] bg-gradient-to-t from-black via-black/80 to-transparent">
           
-          <div className="px-4 py-2 mx-4 mt-2 bg-brand-900/40 backdrop-blur border-l-4 border-brand-500 rounded-r-lg mb-2 shadow-sm animate-in fade-in">
+          <div className="px-4 py-3 mx-4 mt-2 bg-brand-900/60 backdrop-blur border-l-4 border-brand-500 rounded-r-lg mb-2 shadow-sm animate-in fade-in flex flex-col gap-1">
+              {/* System Pinned Message */}
+              <div className="flex items-start gap-2 border-b border-white/10 pb-2 mb-1">
+                  <Shield className="w-3 h-3 text-gold-400 mt-0.5 shrink-0" />
+                  <p className="text-[10px] text-gold-100 font-bold leading-tight">
+                      {t('appRules')}
+                  </p>
+              </div>
+              {/* Room Description */}
               <div className="flex items-start gap-2">
-                  <Info className="w-4 h-4 text-brand-400 mt-0.5 shrink-0" />
+                  <Info className="w-3 h-3 text-brand-400 mt-0.5 shrink-0" />
                   <p className="text-[10px] text-white/90 leading-tight line-clamp-2">
                       {room.description || t('pinned')}
                   </p>
@@ -486,7 +555,8 @@ const RoomView: React.FC<RoomViewProps> = ({ room, currentUser, onAction, langua
               {messages.map((msg) => {
                   const isMe = msg.userId === currentUser.id;
                   const isOfficial = msg.userId === 'OFFECAL' || (msg.userId === room.hostId && room.hostId === 'OFFECAL');
-                  
+                  const isAi = msg.userId === 'AI_HOST';
+
                   if (msg.isGift) {
                       return (
                           <div key={msg.id} className="flex justify-center my-2 animate-pulse">
@@ -501,9 +571,10 @@ const RoomView: React.FC<RoomViewProps> = ({ room, currentUser, onAction, langua
 
                   return (
                       <div key={msg.id} className={`flex items-start gap-2 ${isMe ? 'flex-row-reverse' : ''} animate-in slide-in-from-bottom-2`}>
-                          <div className={`relative w-8 h-8 shrink-0 p-[2px] rounded-full ${getFrameClass(msg.frameId)}`}>
+                          <div className={`relative w-8 h-8 shrink-0 p-[2px] rounded-full ${isAi ? 'border-2 border-brand-400 shadow-lg' : getFrameClass(msg.frameId)}`}>
                               <img src={msg.userAvatar} className="w-full h-full rounded-full object-cover" />
                               {isOfficial && <div className="absolute -bottom-1 -right-1 bg-white rounded-full p-[1px]"><BadgeCheck className="w-3 h-3 text-blue-500 fill-blue-100" /></div>}
+                              {isAi && <div className="absolute -bottom-1 -right-1 bg-black rounded-full p-[2px]"><Bot className="w-3 h-3 text-brand-400" /></div>}
                           </div>
 
                           <div className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} max-w-[80%]`}>
@@ -521,6 +592,7 @@ const RoomView: React.FC<RoomViewProps> = ({ room, currentUser, onAction, langua
                                    <span className={`text-[10px] font-bold flex items-center gap-1 ${getVipTextStyle(msg.vipLevel || 0)}`}>
                                        {msg.userName}
                                        {isOfficial && <BadgeCheck className="w-3 h-3 text-blue-500 fill-white inline" />}
+                                       {isAi && <span className="text-[8px] bg-brand-600 text-white px-1 rounded">BOT</span>}
                                    </span>
                               </div>
                               <div className={`px-3 py-1.5 rounded-2xl text-xs leading-relaxed text-white shadow-sm break-words border border-white/5 backdrop-blur-md ${isMe ? 'bg-brand-600/60 rounded-tr-none' : 'bg-white/10 rounded-tl-none'}`}>
@@ -544,6 +616,15 @@ const RoomView: React.FC<RoomViewProps> = ({ room, currentUser, onAction, langua
               >
                   {seats.find(s => s.userId === currentUser.id)?.isMuted ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
               </button>
+              
+              {/* Speaker Toggle Button */}
+              <button 
+                onClick={handleToggleSpeaker}
+                className={`p-2 rounded-full shadow-lg transition ${isSpeakerMuted ? 'bg-gray-700 text-gray-400' : 'bg-white/10 text-brand-400 hover:bg-white/20'}`}
+              >
+                  {isSpeakerMuted ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}
+              </button>
+
               <button onClick={() => setShowGiftPanel(true)} disabled={isSendingGift} className="p-2 rounded-full bg-gradient-to-r from-pink-500 to-rose-500 text-white shadow-lg shadow-pink-500/20 hover:scale-105 transition disabled:opacity-50"><GiftIcon className="w-5 h-5" /></button>
               <div className="flex-1 relative">
                   <input type="text" value={inputValue} onChange={(e) => setInputValue(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()} placeholder={t('placeholder')} className={`w-full bg-white/10 border border-white/10 rounded-full py-2.5 px-4 text-sm text-white focus:border-brand-500 outline-none placeholder-gray-400 ${language === 'ar' ? 'text-right' : 'text-left'}`}/>
@@ -553,7 +634,84 @@ const RoomView: React.FC<RoomViewProps> = ({ room, currentUser, onAction, langua
           </div>
       </div>
 
-      {/* MODALS */}
+      {/* SETTINGS MODAL */}
+      {showRoomSettings && isHost && (
+          <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in">
+              <div className="w-full max-w-sm bg-gray-900 border border-gray-700 rounded-2xl p-6 shadow-2xl">
+                  <h3 className="text-white font-bold mb-4 text-lg border-b border-gray-700 pb-2">{t('roomSettings')}</h3>
+                  <div className="space-y-4">
+                      {/* AI Host Toggle */}
+                      <div className="flex items-center justify-between p-3 bg-white/5 rounded-xl border border-white/10">
+                          <div className="flex items-center gap-2">
+                              <div className="p-2 bg-brand-500/20 rounded-lg text-brand-400"><Bot className="w-5 h-5"/></div>
+                              <div>
+                                  <h4 className="text-sm font-bold text-white">{t('aiHost')}</h4>
+                                  <p className="text-[10px] text-gray-400">{t('aiHostDesc')}</p>
+                              </div>
+                          </div>
+                          <button 
+                            onClick={() => setIsAiEnabled(!isAiEnabled)} 
+                            className={`w-10 h-6 rounded-full p-1 transition ${isAiEnabled ? 'bg-brand-600' : 'bg-gray-700'}`}
+                          >
+                              <div className={`w-4 h-4 bg-white rounded-full transition-transform ${isAiEnabled ? 'translate-x-4' : 'translate-x-0'}`}></div>
+                          </button>
+                      </div>
+
+                      <div>
+                          <label className="text-xs text-gray-400 mb-1 block">{t('roomTitle')}</label>
+                          <input 
+                              type="text" 
+                              value={editTitle}
+                              onChange={(e) => setEditTitle(e.target.value)}
+                              className="w-full bg-black/40 border border-gray-700 rounded-xl p-3 text-white text-sm focus:border-brand-500 outline-none"
+                          />
+                      </div>
+                      <div>
+                          <label className="text-xs text-gray-400 mb-1 block">{t('roomDesc')}</label>
+                          <textarea 
+                              rows={3}
+                              value={editDesc}
+                              onChange={(e) => setEditDesc(e.target.value)}
+                              className="w-full bg-black/40 border border-gray-700 rounded-xl p-3 text-white text-sm focus:border-brand-500 outline-none resize-none"
+                              placeholder="Set rules or a welcome message..."
+                          ></textarea>
+                      </div>
+                      <div>
+                          <label className="text-xs text-gray-400 mb-2 block">Backgrounds</label>
+                          <div className="grid grid-cols-4 gap-2">
+                              {ROOM_BACKGROUNDS.slice(0, 4).map((bg, i) => (
+                                  <button key={i} onClick={() => handleUpdateRoom(bg)} className="aspect-square rounded-lg border border-transparent hover:border-brand-500 overflow-hidden"><img src={bg} className="w-full h-full object-cover" /></button>
+                              ))}
+                              <label className="aspect-square rounded-lg border-2 border-dashed border-gray-600 flex flex-col items-center justify-center cursor-pointer hover:border-brand-500">
+                                  <input type="file" className="hidden" accept="image/*" onChange={handleCustomBgUpload} />
+                                  <Upload className="w-5 h-5 text-gray-500" />
+                                  <span className="text-[7px] text-gray-500 mt-1">{t('uploadBg')}</span>
+                              </label>
+                          </div>
+                      </div>
+                  </div>
+                  <div className="flex gap-3 mt-6">
+                       <button onClick={() => setShowRoomSettings(false)} className="flex-1 py-3 bg-gray-800 text-gray-400 rounded-xl font-bold">{t('cancel')}</button>
+                       <button onClick={() => handleUpdateRoom(room.thumbnail)} className="flex-1 py-3 bg-brand-600 text-white rounded-xl font-bold">{t('save')}</button>
+                  </div>
+              </div>
+          </div>
+      )}
+
+      {showExitModal && (
+          <div className="absolute inset-0 z-50 flex items-end sm:items-center justify-center bg-black/80 backdrop-blur-sm animate-in fade-in">
+              <div className="w-full max-w-sm bg-gray-900 border border-gray-700 rounded-t-3xl sm:rounded-3xl p-6 shadow-2xl">
+                   <h3 className="text-white font-bold text-lg mb-6 text-center">{t('exitTitle')}</h3>
+                   <div className="space-y-3">
+                       <button onClick={() => onAction('minimize')} className="w-full py-4 rounded-xl bg-gray-800 text-white font-bold flex items-center justify-center gap-3 hover:bg-gray-700 transition"><Minimize2 className="w-5 h-5 text-blue-400" />{t('minimize')}</button>
+                       <button onClick={handleLeaveRoomAction} className="w-full py-4 rounded-xl bg-red-900/20 text-red-500 border border-red-900/50 font-bold flex items-center justify-center gap-3 hover:bg-red-900/30 transition"><LogOut className="w-5 h-5" />{t('leave')}</button>
+                       <button onClick={() => setShowExitModal(false)} className="w-full py-3 text-gray-500 font-medium text-sm mt-2">{t('cancel')}</button>
+                   </div>
+              </div>
+          </div>
+      )}
+
+      {/* GIFT PANEL AND USER LIST MODALS REMAIN UNCHANGED FOR BREVITY BUT ARE INCLUDED IN FULL FILE */}
       {showGiftPanel && (
           <div className="absolute inset-0 z-50 flex flex-col justify-end bg-black/50 backdrop-blur-sm animate-in slide-in-from-bottom-10">
               <div className="bg-gray-900 border-t border-gray-700 rounded-t-3xl p-4 shadow-2xl">
@@ -614,12 +772,12 @@ const RoomView: React.FC<RoomViewProps> = ({ room, currentUser, onAction, langua
 
       {showLeaderboard && (
           <RoomLeaderboard 
-              contributors={room.seats.filter(s => s.userId).map(s => ({ userId: s.userId!, name: s.userName!, avatar: s.userAvatar!, amount: s.giftCount }))} // Temporary mock data mapping, needs real contributors from DB if available separately
+              contributors={room.contributors ? Object.values(room.contributors) : []} 
               onClose={() => setShowLeaderboard(false)}
+              language={language}
           />
       )}
 
-      {/* Online Users Modal */}
       {showUserList && (
           <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in">
               <div className="w-full max-w-sm bg-gray-900 border border-gray-700 rounded-2xl shadow-2xl overflow-hidden max-h-[60vh] flex flex-col">
@@ -675,67 +833,6 @@ const RoomView: React.FC<RoomViewProps> = ({ room, currentUser, onAction, langua
               </div>
           </div>
       )}
-
-      {showExitModal && (
-          <div className="absolute inset-0 z-50 flex items-end sm:items-center justify-center bg-black/80 backdrop-blur-sm animate-in fade-in">
-              <div className="w-full max-w-sm bg-gray-900 border border-gray-700 rounded-t-3xl sm:rounded-3xl p-6 shadow-2xl">
-                   <h3 className="text-white font-bold text-lg mb-6 text-center">{t('exitTitle')}</h3>
-                   <div className="space-y-3">
-                       <button onClick={() => onAction('minimize')} className="w-full py-4 rounded-xl bg-gray-800 text-white font-bold flex items-center justify-center gap-3 hover:bg-gray-700 transition"><Minimize2 className="w-5 h-5 text-blue-400" />{t('minimize')}</button>
-                       <button onClick={handleLeaveRoomAction} className="w-full py-4 rounded-xl bg-red-900/20 text-red-500 border border-red-900/50 font-bold flex items-center justify-center gap-3 hover:bg-red-900/30 transition"><LogOut className="w-5 h-5" />{t('leave')}</button>
-                       <button onClick={() => setShowExitModal(false)} className="w-full py-3 text-gray-500 font-medium text-sm mt-2">{t('cancel')}</button>
-                   </div>
-              </div>
-          </div>
-      )}
-
-      {showRoomSettings && isHost && (
-          <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in">
-              <div className="w-full max-w-sm bg-gray-900 border border-gray-700 rounded-2xl p-6 shadow-2xl">
-                  <h3 className="text-white font-bold mb-4 text-lg border-b border-gray-700 pb-2">{t('roomSettings')}</h3>
-                  <div className="space-y-4">
-                      <div>
-                          <label className="text-xs text-gray-400 mb-1 block">{t('roomTitle')}</label>
-                          <input 
-                              type="text" 
-                              value={editTitle}
-                              onChange={(e) => setEditTitle(e.target.value)}
-                              className="w-full bg-black/40 border border-gray-700 rounded-xl p-3 text-white text-sm focus:border-brand-500 outline-none"
-                          />
-                      </div>
-                      <div>
-                          <label className="text-xs text-gray-400 mb-1 block">{t('roomDesc')}</label>
-                          <textarea 
-                              rows={3}
-                              value={editDesc}
-                              onChange={(e) => setEditDesc(e.target.value)}
-                              className="w-full bg-black/40 border border-gray-700 rounded-xl p-3 text-white text-sm focus:border-brand-500 outline-none resize-none"
-                              placeholder="Set rules or a welcome message..."
-                          ></textarea>
-                      </div>
-                      <div>
-                          <label className="text-xs text-gray-400 mb-2 block">Backgrounds</label>
-                          <div className="grid grid-cols-4 gap-2">
-                              {ROOM_BACKGROUNDS.slice(0, 4).map((bg, i) => (
-                                  <button key={i} onClick={() => handleUpdateRoom(bg)} className="aspect-square rounded-lg border border-transparent hover:border-brand-500 overflow-hidden"><img src={bg} className="w-full h-full object-cover" /></button>
-                              ))}
-                              <label className="aspect-square rounded-lg border-2 border-dashed border-gray-600 flex flex-col items-center justify-center cursor-pointer hover:border-brand-500">
-                                  <input type="file" className="hidden" accept="image/*" onChange={handleCustomBgUpload} />
-                                  <Upload className="w-5 h-5 text-gray-500" />
-                                  <span className="text-[7px] text-gray-500 mt-1">{t('uploadBg')}</span>
-                              </label>
-                          </div>
-                      </div>
-                  </div>
-                  <div className="flex gap-3 mt-6">
-                       <button onClick={() => setShowRoomSettings(false)} className="flex-1 py-3 bg-gray-800 text-gray-400 rounded-xl font-bold">{t('cancel')}</button>
-                       <button onClick={() => handleUpdateRoom(room.thumbnail)} className="flex-1 py-3 bg-brand-600 text-white rounded-xl font-bold">{t('save')}</button>
-                  </div>
-              </div>
-          </div>
-      )}
     </div>
   );
 };
-
-export default RoomView;

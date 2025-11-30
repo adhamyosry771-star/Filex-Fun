@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { Home, Trophy, User as UserIcon, Users, PlusCircle, Copy, MessageSquare, Loader2, ChevronRight, Crown, ShoppingBag, Wallet as WalletIcon, Settings, Gem, Coins, Edit3, Zap, X, Trash2, Shield, Info, Smartphone, Star, Gamepad2, BadgeCheck, Database } from 'lucide-react';
 import HomeView from './components/HomeView';
-import RoomView from './components/RoomView';
+import { RoomView } from './components/RoomView';
 import LoginView from './components/LoginView';
 import InfoView from './components/InfoView';
 import StoreView from './components/StoreView';
@@ -382,7 +382,7 @@ const App: React.FC = () => {
         const wealthIcon = getIconByLevel(wealthInfo.level, 'wealth');
         const charmIcon = getIconByLevel(charmInfo.level, 'charm');
 
-        // STRICTLY CHECK FOR OWNER ID 'OFFECAL' TO SHOW ADMIN BUTTON
+        // Check specifically for the Owner ID 'OFFECAL' to show the Admin Panel button
         const isOwner = userProfile.id === 'OFFECAL';
 
         return (
@@ -399,16 +399,7 @@ const App: React.FC = () => {
                     <div className={`w-32 h-32 rounded-full relative p-[3px] ${frameClass}`}>
                         <img src={userProfile.avatar} className="w-full h-full rounded-full object-cover border-4 border-gray-900" alt="Profile" />
                     </div>
-                    {isOfficial && (
-                        <div className="absolute top-0 right-0 bg-white rounded-full p-0.5 z-20 shadow-md">
-                            <BadgeCheck className="w-6 h-6 text-blue-500 fill-blue-100" />
-                        </div>
-                    )}
-                    {adminRole && (
-                        <div className={`absolute bottom-0 left-0 text-[10px] font-bold px-2 py-0.5 rounded-full z-20 shadow-md ${ADMIN_ROLES[adminRole].class}`}>
-                            {ADMIN_ROLES[adminRole].name[language]}
-                        </div>
-                    )}
+                    {/* BADGES REMOVED FROM HERE AS PER REQUEST */}
                     <div className="absolute bottom-1 right-1 bg-brand-600 rounded-full p-1.5 shadow-lg border-2 border-gray-900">
                         <Edit3 className="w-4 h-4 text-white" />
                     </div>
@@ -419,7 +410,7 @@ const App: React.FC = () => {
                     {isOfficial && <BadgeCheck className="w-5 h-5 text-blue-500 fill-white" />}
                  </h2>
 
-                 {/* Badges Row (Admin / VIP) */}
+                 {/* Badges Row (Admin / VIP) - DISPLAYED HERE */}
                  <div className="flex items-center gap-2 mt-1">
                     {adminRole && (
                        <div className={`text-[10px] font-bold px-3 py-0.5 rounded-full border ${ADMIN_ROLES[adminRole].class}`}>
@@ -534,7 +525,6 @@ const App: React.FC = () => {
                 </div>
 
                 <div className="glass-card rounded-2xl overflow-hidden mb-6 bg-gray-800/50">
-                    {/* ONLY SHOW ADMIN PANEL IF IS OWNER (OFFECAL) */}
                     {isOwner && (
                         <div onClick={() => setCurrentView(ViewState.ADMIN)} className="p-4 border-b border-white/5 flex justify-between items-center bg-red-900/10 hover:bg-red-900/20 transition cursor-pointer group">
                             <div className="flex items-center gap-3"><Shield className="w-5 h-5 text-red-500 transition group-hover:scale-110" /><span className="text-sm font-bold text-red-400">{t('admin')}</span></div>

@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
-import { Shield, Trash2, Ban, Search, Gift, Crown, ArrowLeft, RefreshCw, CheckCircle, Megaphone, Edit3, Send, Home, XCircle, Flame, Image as ImageIcon, Plus, X, Database, Clock } from 'lucide-react';
-import { getAllUsers, adminUpdateUser, deleteAllRooms, sendSystemNotification, broadcastOfficialMessage, searchUserByDisplayId, getRoomByHostId, adminBanRoom, deleteRoom, toggleRoomHotStatus, addBanner, deleteBanner, listenToBanners } from '../services/firebaseService';
+import { Shield, Trash2, Ban, Search, Gift, Crown, ArrowLeft, RefreshCw, CheckCircle, Megaphone, Edit3, Send, Home, XCircle, Flame, Image as ImageIcon, Plus, X, Database, Clock, Gamepad2 } from 'lucide-react';
+import { getAllUsers, adminUpdateUser, deleteAllRooms, sendSystemNotification, broadcastOfficialMessage, searchUserByDisplayId, getRoomByHostId, adminBanRoom, deleteRoom, toggleRoomHotStatus, toggleRoomActivitiesStatus, addBanner, deleteBanner, listenToBanners } from '../services/firebaseService';
 import { Language, User, Room, Banner } from '../types';
 import { VIP_TIERS, ADMIN_ROLES } from '../constants';
 
@@ -167,6 +167,21 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, language }) => 
               setSearchedRoom({...searchedRoom, isHot: !currentStatus});
           }
           alert(currentStatus ? "تم إزالة HOT" : "تم تعيين كـ HOT");
+      } catch (e) {
+          alert("فشل التحديث");
+      }
+      setActionLoading(null);
+  };
+
+  const handleToggleActivities = async (roomId: string, currentStatus: boolean) => {
+      if (!roomId) return;
+      setActionLoading('room_activities');
+      try {
+          await toggleRoomActivitiesStatus(roomId, !currentStatus);
+          if (searchedRoom && searchedRoom.id === roomId) {
+              setSearchedRoom({...searchedRoom, isActivities: !currentStatus});
+          }
+          alert(currentStatus ? "تم إزالة شارة الأنشطة" : "تم إضافة شارة الأنشطة");
       } catch (e) {
           alert("فشل التحديث");
       }
@@ -529,6 +544,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, language }) => 
                                           </div>
                                           {searchedRoom.isBanned && <span className="mr-auto bg-red-600 text-white text-[10px] px-2 py-1 rounded font-bold">غرفة محظورة</span>}
                                           {searchedRoom.isHot && <span className="bg-red-600/20 text-red-500 text-[10px] px-2 py-1 rounded font-bold border border-red-500/50 flex items-center gap-1"><Flame className="w-3 h-3"/> HOT</span>}
+                                          {searchedRoom.isActivities && <span className="bg-blue-600/20 text-blue-500 text-[10px] px-2 py-1 rounded font-bold border border-blue-500/50 flex items-center gap-1"><Gamepad2 className="w-3 h-3"/> ACT</span>}
                                       </div>
                                       <div className="grid grid-cols-2 gap-2">
                                            <button onClick={() => handleBanRoom(searchedRoom.id, searchedRoom.isBanned || false)} className={`py-1.5 rounded text-xs flex items-center justify-center gap-1 ${searchedRoom.isBanned ? 'bg-green-600 text-white' : 'bg-red-600 text-white'}`}>
@@ -536,6 +552,9 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, language }) => 
                                           </button>
                                           <button onClick={() => handleToggleHot(searchedRoom.id, searchedRoom.isHot || false)} className={`py-1.5 rounded text-xs flex items-center justify-center gap-1 ${searchedRoom.isHot ? 'bg-orange-600/20 text-orange-500 border border-orange-600' : 'bg-gray-800 text-gray-400'}`}>
                                               {searchedRoom.isHot ? 'إزالة HOT' : 'تعيين كـ HOT'}
+                                          </button>
+                                          <button onClick={() => handleToggleActivities(searchedRoom.id, searchedRoom.isActivities || false)} className={`col-span-2 py-1.5 rounded text-xs flex items-center justify-center gap-1 ${searchedRoom.isActivities ? 'bg-red-600/20 text-red-500 border border-red-600' : 'bg-gray-800 text-gray-400'}`}>
+                                              <Gamepad2 className="w-3 h-3"/> {searchedRoom.isActivities ? 'إزالة شارة الأنشطة' : 'إضافة شارة الأنشطة'}
                                           </button>
                                           <button onClick={() => handleDeleteSingleRoom(searchedRoom.id)} className="col-span-2 bg-red-900/50 text-red-500 border border-red-900 py-1.5 rounded text-xs flex items-center justify-center gap-1">
                                               حذف الغرفة

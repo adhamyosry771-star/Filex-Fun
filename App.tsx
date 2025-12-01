@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { Home, Trophy, User as UserIcon, Users, PlusCircle, Copy, MessageSquare, Loader2, ChevronRight, Crown, ShoppingBag, Wallet as WalletIcon, Settings, Gem, Coins, Edit3, Zap, X, Trash2, Shield, Info, Smartphone, Star, Gamepad2, BadgeCheck, Database } from 'lucide-react';
 import HomeView from './components/HomeView';
@@ -19,7 +18,7 @@ import AgencyView from './components/AgencyView';
 import { ViewState, Room, User, Language, PrivateChatSummary } from './types';
 import { auth } from './firebaseConfig';
 import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
-import { getUserProfile, createUserProfile, logoutUser, listenToRooms, updateUserProfile, listenToUserProfile, listenToChatList, initiatePrivateChat, searchUserByDisplayId, incrementViewerCount, adminUpdateUser } from './services/firebaseService';
+import { getUserProfile, createUserProfile, logoutUser, listenToRooms, updateUserProfile, listenToUserProfile, listenToChatList, initiatePrivateChat, searchUserByDisplayId, incrementViewerCount, adminUpdateUser, listenToUnreadNotifications, listenToFriendRequests } from './services/firebaseService';
 import { CURRENT_USER, STORE_ITEMS, VIP_TIERS, ADMIN_ROLES, LEVEL_ICONS, CHARM_ICONS } from './constants';
 
 const App: React.FC = () => {
@@ -40,7 +39,14 @@ const App: React.FC = () => {
   const [showSupport, setShowSupport] = useState(false);
 
   const [activeChat, setActiveChat] = useState<PrivateChatSummary | null>(null);
-  const [totalUnread, setTotalUnread] = useState(0);
+  
+  // Badge States
+  const [unreadChatsCount, setUnreadChatsCount] = useState(0);
+  const [unreadNotifsCount, setUnreadNotifsCount] = useState(0);
+  const [unreadRequestsCount, setUnreadRequestsCount] = useState(0);
+  
+  // Total Badge Calculation
+  const totalUnread = unreadChatsCount + unreadNotifsCount + unreadRequestsCount;
 
   useEffect(() => {
     if (isGuest) {
@@ -50,18 +56,17 @@ const App: React.FC = () => {
 
     let profileUnsubscribe: (() => void) | null = null;
     let chatsUnsubscribe: (() => void) | null = null;
+    let notifsUnsubscribe: (() => void) | null = null;
+    let requestsUnsubscribe: (() => void) | null = null;
 
     const authUnsubscribe = onAuthStateChanged(auth, async (user) => {
       setIsLoading(true);
       
-      if (profileUnsubscribe) {
-          profileUnsubscribe();
-          profileUnsubscribe = null;
-      }
-      if (chatsUnsubscribe) {
-          chatsUnsubscribe();
-          chatsUnsubscribe = null;
-      }
+      // Cleanup previous listeners
+      if (profileUnsubscribe) { profileUnsubscribe(); profileUnsubscribe = null; }
+      if (chatsUnsubscribe) { chatsUnsubscribe(); chatsUnsubscribe = null; }
+      if (notifsUnsubscribe) { notifsUnsubscribe(); notifsUnsubscribe = null; }
+      if (requestsUnsubscribe) { requestsUnsubscribe(); requestsUnsubscribe = null; }
 
       if (user) {
         setAuthUser(user);
@@ -70,12 +75,9 @@ const App: React.FC = () => {
         profileUnsubscribe = listenToUserProfile(user.uid, async (profile) => {
             if (profile) {
                  if (profile.isBanned) {
-                    // Check expiration
                     if (!profile.isPermanentBan && profile.banExpiresAt && profile.banExpiresAt < Date.now()) {
-                        // Ban expired, auto unban
                         await adminUpdateUser(user.uid, { isBanned: false, banExpiresAt: 0, isPermanentBan: false });
                     } else {
-                        // Still Banned
                         const dateStr = profile.banExpiresAt ? new Date(profile.banExpiresAt).toLocaleString(language === 'ar' ? 'ar-EG' : 'en-US') : '';
                         const banMsg = profile.isPermanentBan 
                             ? (language === 'ar' ? "⛔ تم حظر حسابك بشكل دائم من قبل الإدارة." : "⛔ Your account has been permanently banned.")
@@ -98,10 +100,20 @@ const App: React.FC = () => {
             setIsLoading(false);
         });
 
-        // Listen Chats for Unread Count
+        // 1. Listen Chats Unread
         chatsUnsubscribe = listenToChatList(user.uid, (chats) => {
-            const unread = chats.reduce((acc, chat) => acc + (chat.unreadCount || 0), 0);
-            setTotalUnread(unread);
+            const count = chats.reduce((acc, chat) => acc + (chat.unreadCount || 0), 0);
+            setUnreadChatsCount(count);
+        });
+
+        // 2. Listen System Notifications Unread
+        notifsUnsubscribe = listenToUnreadNotifications(user.uid, (count) => {
+            setUnreadNotifsCount(count);
+        });
+
+        // 3. Listen Friend Requests
+        requestsUnsubscribe = listenToFriendRequests(user.uid, (reqs) => {
+            setUnreadRequestsCount(reqs.length);
         });
 
       } else {
@@ -109,7 +121,9 @@ const App: React.FC = () => {
         setUserProfile(null);
         setIsOnboarding(false);
         setIsLoading(false);
-        setTotalUnread(0);
+        setUnreadChatsCount(0);
+        setUnreadNotifsCount(0);
+        setUnreadRequestsCount(0);
       }
     });
 
@@ -117,6 +131,8 @@ const App: React.FC = () => {
         authUnsubscribe();
         if (profileUnsubscribe) profileUnsubscribe();
         if (chatsUnsubscribe) chatsUnsubscribe();
+        if (notifsUnsubscribe) notifsUnsubscribe();
+        if (requestsUnsubscribe) requestsUnsubscribe();
     };
   }, [isGuest, language]);
 
@@ -637,7 +653,7 @@ const App: React.FC = () => {
               <span className="text-[10px] mt-1 font-bold">{t('msgs')}</span>
               {totalUnread > 0 && (
                   <div className="absolute top-1 right-3 w-4 h-4 bg-red-500 text-white text-[9px] font-bold rounded-full flex items-center justify-center animate-pulse">
-                      {totalUnread}
+                      {totalUnread > 99 ? '99+' : totalUnread}
                   </div>
               )}
           </button>

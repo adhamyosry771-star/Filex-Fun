@@ -45,7 +45,8 @@ export interface User {
   wallet?: Wallet;
   equippedFrame?: string;
   equippedBubble?: string;
-  ownedItems?: string[];
+  inventory?: Record<string, number>; // ItemId -> Expiration Timestamp
+  ownedItems?: string[]; // Deprecated, but kept for compatibility
   friendsCount?: number;
   followersCount?: number;
   followingCount?: number;
@@ -91,6 +92,8 @@ export interface PrivateMessage {
   text: string;
   timestamp: number;
   read: boolean;
+  frameId?: string;
+  bubbleId?: string;
 }
 
 export interface PrivateChatSummary {
@@ -108,6 +111,7 @@ export interface RoomSeat {
   userId: string | null;
   userName: string | null;
   userAvatar: string | null;
+  frameId?: string; // Frame visible on seat
   isMuted: boolean;
   isLocked: boolean;
   giftCount: number;
@@ -138,6 +142,7 @@ export interface Room {
   isBanned?: boolean;
   isHot?: boolean;
   isOfficial?: boolean;
+  isActivities?: boolean; // New field for Activities Badge
   contributors?: Record<string, Contributor>;
   bannedUsers?: string[]; // Array of User IDs (UIDs) banned from this room
   admins?: string[]; // Array of User IDs (UIDs) who are room admins

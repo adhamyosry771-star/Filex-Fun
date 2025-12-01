@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { Users, Search, Bell, Plus, X, Image as ImageIcon, Upload, Flame, Tag, UserPlus, BadgeCheck, ChevronRight, ChevronLeft } from 'lucide-react';
+import { Users, Search, Bell, Plus, X, Image as ImageIcon, Upload, Flame, Tag, UserPlus, BadgeCheck, ChevronRight, ChevronLeft, Gamepad2 } from 'lucide-react';
 import { Room, Language, User, Banner } from '../types';
 import { createRoom, listenToBanners } from '../services/firebaseService';
 import { auth } from '../firebaseConfig';
@@ -270,11 +270,15 @@ const HomeView: React.FC<HomeViewProps> = ({ rooms, onJoinRoom, language, userPr
                 {filteredRooms.map((room) => {
                     // Styles for special rooms
                     const isOfficial = room.isOfficial || room.displayId === 'OFFECAL';
+                    const isActivities = room.isActivities;
+                    
                     const containerClass = isOfficial 
                         ? 'border-2 border-red-500 shadow-[0_0_15px_rgba(239,68,68,0.4)]' 
-                        : room.isHot 
-                            ? 'border-2 border-orange-500/50 shadow-[0_0_10px_rgba(249,115,22,0.3)]'
-                            : 'border border-white/5';
+                        : isActivities
+                            ? 'border-2 border-red-600/70 shadow-[0_0_10px_rgba(220,38,38,0.4)]'
+                            : room.isHot 
+                                ? 'border-2 border-orange-500/50 shadow-[0_0_10px_rgba(249,115,22,0.3)]'
+                                : 'border border-white/5';
                     
                     return (
                         <div 
@@ -294,6 +298,14 @@ const HomeView: React.FC<HomeViewProps> = ({ rooms, onJoinRoom, language, userPr
                                 />
                                 <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent pointer-events-none"></div>
                                 
+                                {/* Music Wave Animation - Top Right */}
+                                <div className="absolute top-3 right-3 flex items-end gap-0.5 z-20 pointer-events-none">
+                                    <div className="w-0.5 h-2 bg-brand-400 rounded-full animate-[pulse_0.6s_ease-in-out_infinite]"></div>
+                                    <div className="w-0.5 h-4 bg-brand-400 rounded-full animate-[pulse_0.8s_ease-in-out_infinite]"></div>
+                                    <div className="w-0.5 h-3 bg-brand-400 rounded-full animate-[pulse_1s_ease-in-out_infinite]"></div>
+                                    <div className="w-0.5 h-2 bg-brand-400 rounded-full animate-[pulse_1.2s_ease-in-out_infinite]"></div>
+                                </div>
+
                                 {/* Status Tags */}
                                 <div className="absolute top-2 left-2 flex flex-col gap-1 items-start pointer-events-none">
                                     {isOfficial && (
@@ -302,17 +314,18 @@ const HomeView: React.FC<HomeViewProps> = ({ rooms, onJoinRoom, language, userPr
                                             <span className="text-[9px] font-bold text-white">OFFICIAL</span>
                                         </div>
                                     )}
-                                    {room.isHot && !isOfficial && (
+                                    {isActivities && (
+                                        <div className="bg-red-600/90 backdrop-blur rounded-full px-2 py-0.5 w-fit flex items-center gap-1 shadow-lg border border-red-400/50">
+                                            <Gamepad2 className="w-3 h-3 text-white fill-white" />
+                                            <span className="text-[9px] font-bold text-white">ACTIVITIES</span>
+                                        </div>
+                                    )}
+                                    {room.isHot && !isOfficial && !isActivities && (
                                         <div className="bg-red-600/90 backdrop-blur rounded-full px-2 py-0.5 w-fit flex items-center gap-1 shadow-lg border border-red-500/30">
                                             <Flame className="w-3 h-3 text-white fill-white animate-pulse" />
                                             <span className="text-[10px] font-bold text-white">HOT</span>
                                         </div>
                                     )}
-                                    <div className="bg-black/50 backdrop-blur rounded-full p-1 w-fit mt-0.5">
-                                        <div className="w-4 h-4 rounded-full bg-red-500 animate-pulse flex items-center justify-center">
-                                            <div className="w-1.5 h-1.5 bg-white rounded-full"></div>
-                                        </div>
-                                    </div>
                                 </div>
 
                                 <div className="absolute bottom-3 left-3 right-3 pointer-events-none">

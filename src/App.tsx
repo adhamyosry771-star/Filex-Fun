@@ -19,7 +19,7 @@ import AgencyView from './components/AgencyView';
 import { ViewState, Room, User, Language, PrivateChatSummary } from './types';
 import { auth } from './firebaseConfig';
 import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
-import { getUserProfile, createUserProfile, logoutUser, listenToRooms, updateUserProfile, listenToUserProfile, listenToChatList, initiatePrivateChat, searchUserByDisplayId, incrementViewerCount } from './services/firebaseService';
+import { getUserProfile, createUserProfile, logoutUser, listenToRooms, updateUserProfile, listenToUserProfile, listenToChatList, initiatePrivateChat, searchUserByDisplayId, incrementViewerCount, adminUpdateUser, listenToUnreadNotifications, listenToFriendRequests } from './services/firebaseService';
 import { CURRENT_USER, STORE_ITEMS, VIP_TIERS, ADMIN_ROLES, LEVEL_ICONS, CHARM_ICONS } from './constants';
 
 const App: React.FC = () => {
@@ -40,7 +40,14 @@ const App: React.FC = () => {
   const [showSupport, setShowSupport] = useState(false);
 
   const [activeChat, setActiveChat] = useState<PrivateChatSummary | null>(null);
-  const [totalUnread, setTotalUnread] = useState(0);
+  
+  // Badge States
+  const [unreadChatsCount, setUnreadChatsCount] = useState(0);
+  const [unreadNotifsCount, setUnreadNotifsCount] = useState(0);
+  const [unreadRequestsCount, setUnreadRequestsCount] = useState(0);
+  
+  // Total Badge Calculation
+  const totalUnread = unreadChatsCount + unreadNotifsCount + unreadRequestsCount;
 
   useEffect(() => {
     if (isGuest) {
@@ -50,32 +57,40 @@ const App: React.FC = () => {
 
     let profileUnsubscribe: (() => void) | null = null;
     let chatsUnsubscribe: (() => void) | null = null;
+    let notifsUnsubscribe: (() => void) | null = null;
+    let requestsUnsubscribe: (() => void) | null = null;
 
     const authUnsubscribe = onAuthStateChanged(auth, async (user) => {
       setIsLoading(true);
       
-      if (profileUnsubscribe) {
-          profileUnsubscribe();
-          profileUnsubscribe = null;
-      }
-      if (chatsUnsubscribe) {
-          chatsUnsubscribe();
-          chatsUnsubscribe = null;
-      }
+      // Cleanup previous listeners
+      if (profileUnsubscribe) { profileUnsubscribe(); profileUnsubscribe = null; }
+      if (chatsUnsubscribe) { chatsUnsubscribe(); chatsUnsubscribe = null; }
+      if (notifsUnsubscribe) { notifsUnsubscribe(); notifsUnsubscribe = null; }
+      if (requestsUnsubscribe) { requestsUnsubscribe(); requestsUnsubscribe = null; }
 
       if (user) {
         setAuthUser(user);
         
         // Listen Profile
-        profileUnsubscribe = listenToUserProfile(user.uid, (profile) => {
+        profileUnsubscribe = listenToUserProfile(user.uid, async (profile) => {
             if (profile) {
                  if (profile.isBanned) {
-                    alert("🚫 Account Banned.");
-                    logoutUser();
-                    setAuthUser(null);
-                    setUserProfile(null);
-                    setIsLoading(false);
-                    return;
+                    if (!profile.isPermanentBan && profile.banExpiresAt && profile.banExpiresAt < Date.now()) {
+                        await adminUpdateUser(user.uid, { isBanned: false, banExpiresAt: 0, isPermanentBan: false });
+                    } else {
+                        const dateStr = profile.banExpiresAt ? new Date(profile.banExpiresAt).toLocaleString(language === 'ar' ? 'ar-EG' : 'en-US') : '';
+                        const banMsg = profile.isPermanentBan 
+                            ? (language === 'ar' ? "⛔ تم حظر حسابك بشكل دائم من قبل الإدارة." : "⛔ Your account has been permanently banned.")
+                            : (language === 'ar' ? `⚠️ حسابك محظور مؤقتاً.\nسيتم رفع الحظر في: ${dateStr}` : `⚠️ Account Suspended.\nBan expires on: ${dateStr}`);
+                        
+                        alert(banMsg);
+                        logoutUser();
+                        setAuthUser(null);
+                        setUserProfile(null);
+                        setIsLoading(false);
+                        return;
+                    }
                 }
                 setUserProfile(profile);
                 setIsOnboarding(false);
@@ -86,10 +101,20 @@ const App: React.FC = () => {
             setIsLoading(false);
         });
 
-        // Listen Chats for Unread Count
+        // 1. Listen Chats Unread
         chatsUnsubscribe = listenToChatList(user.uid, (chats) => {
-            const unread = chats.reduce((acc, chat) => acc + (chat.unreadCount || 0), 0);
-            setTotalUnread(unread);
+            const count = chats.reduce((acc, chat) => acc + (chat.unreadCount || 0), 0);
+            setUnreadChatsCount(count);
+        });
+
+        // 2. Listen System Notifications Unread
+        notifsUnsubscribe = listenToUnreadNotifications(user.uid, (count) => {
+            setUnreadNotifsCount(count);
+        });
+
+        // 3. Listen Friend Requests
+        requestsUnsubscribe = listenToFriendRequests(user.uid, (reqs) => {
+            setUnreadRequestsCount(reqs.length);
         });
 
       } else {
@@ -97,7 +122,9 @@ const App: React.FC = () => {
         setUserProfile(null);
         setIsOnboarding(false);
         setIsLoading(false);
-        setTotalUnread(0);
+        setUnreadChatsCount(0);
+        setUnreadNotifsCount(0);
+        setUnreadRequestsCount(0);
       }
     });
 
@@ -105,8 +132,10 @@ const App: React.FC = () => {
         authUnsubscribe();
         if (profileUnsubscribe) profileUnsubscribe();
         if (chatsUnsubscribe) chatsUnsubscribe();
+        if (notifsUnsubscribe) notifsUnsubscribe();
+        if (requestsUnsubscribe) requestsUnsubscribe();
     };
-  }, [isGuest]);
+  }, [isGuest, language]);
 
   useEffect(() => {
     const unsubscribe = listenToRooms((updatedRooms) => {
@@ -621,13 +650,15 @@ const App: React.FC = () => {
           </div>
           
           <button onClick={() => setCurrentView(ViewState.MESSAGES)} className={`flex flex-col items-center p-2 rounded-lg transition ${currentView === ViewState.MESSAGES ? 'text-brand-500' : 'text-gray-500'} relative`}>
-              <MessageSquare className="w-6 h-6" />
+              <div className="relative">
+                  <MessageSquare className="w-6 h-6" />
+                  {totalUnread > 0 && (
+                      <div className="absolute -top-1 -right-1 min-w-[16px] h-[16px] bg-red-600 text-white text-[10px] font-bold rounded-full flex items-center justify-center border-2 border-gray-900 z-20">
+                          {totalUnread > 99 ? '99+' : totalUnread}
+                      </div>
+                  )}
+              </div>
               <span className="text-[10px] mt-1 font-bold">{t('msgs')}</span>
-              {totalUnread > 0 && (
-                  <div className="absolute top-1 right-3 w-4 h-4 bg-red-500 text-white text-[9px] font-bold rounded-full flex items-center justify-center animate-pulse">
-                      {totalUnread}
-                  </div>
-              )}
           </button>
           <button onClick={() => setCurrentView(ViewState.PROFILE)} className={`flex flex-col items-center p-2 rounded-lg transition ${currentView === ViewState.PROFILE ? 'text-brand-500' : 'text-gray-500'}`}><UserIcon className="w-6 h-6" /><span className="text-[10px] mt-1 font-bold">{t('me')}</span></button>
         </nav>

@@ -1,8 +1,9 @@
 
-import React from 'react';
-import { ArrowLeft, CreditCard, Wallet as WalletIcon } from 'lucide-react';
+import React, { useState } from 'react';
+import { ArrowLeft, CreditCard, Wallet as WalletIcon, Loader2 } from 'lucide-react';
 import { Language, User } from '../types';
 import { VIP_TIERS } from '../constants';
+import { exchangeCoinsToDiamonds } from '../services/firebaseService';
 
 interface WalletViewProps {
   user: User;
@@ -11,6 +12,7 @@ interface WalletViewProps {
 }
 
 const WalletView: React.FC<WalletViewProps> = ({ user, language, onBack }) => {
+  const [loading, setLoading] = useState(false);
   const vipTier = VIP_TIERS.find(t => t.level === (user.vipLevel || 0));
 
   const t = (key: string) => {
@@ -22,9 +24,42 @@ const WalletView: React.FC<WalletViewProps> = ({ user, language, onBack }) => {
       recharge: { ar: 'شحن', en: 'Recharge' },
       exchange: { ar: 'تحويل', en: 'Exchange' },
       history: { ar: 'السجل', en: 'History' },
-      vipPerk: { ar: `ميزة VIP: خصم ${vipTier?.discount}% على الشحن`, en: `VIP Perk: ${vipTier?.discount}% Off Recharge` }
+      vipPerk: { ar: `ميزة VIP: خصم ${vipTier?.discount}% على الشحن`, en: `VIP Perk: ${vipTier?.discount}% Off Recharge` },
+      success: { ar: 'تم التحويل بنجاح!', en: 'Conversion Successful!' },
+      noCoins: { ar: 'لا يوجد كوينز للتحويل', en: 'No coins to exchange' },
+      enterAmount: { ar: 'أدخل كمية التحويل (كوينز)', en: 'Enter amount to exchange (Coins)' },
+      invalidAmount: { ar: 'كمية غير صالحة', en: 'Invalid amount' }
     };
     return dict[key][language];
+  };
+
+  const handleExchange = async () => {
+      const currentCoins = user.wallet?.coins || 0;
+      if (currentCoins <= 0) {
+          alert(t('noCoins'));
+          return;
+      }
+
+      const input = prompt(t('enterAmount'));
+      if (!input) return;
+
+      const amount = parseInt(input);
+      if (isNaN(amount) || amount <= 0 || amount > currentCoins) {
+          alert(t('invalidAmount'));
+          return;
+      }
+
+      setLoading(true);
+      try {
+          if (user.uid) {
+              await exchangeCoinsToDiamonds(user.uid, amount);
+              alert(t('success'));
+          }
+      } catch (e) {
+          console.error(e);
+          alert("Error converting");
+      }
+      setLoading(false);
   };
 
   return (
@@ -69,8 +104,12 @@ const WalletView: React.FC<WalletViewProps> = ({ user, language, onBack }) => {
                     {t('coins')} <span className="bg-yellow-600 text-white text-[10px] px-2 py-0.5 rounded-full">Earned</span>
                 </h3>
                 <p className="text-4xl font-bold text-white tracking-wider">{user.wallet?.coins || 0}</p>
-                <button className="mt-6 w-full bg-white/10 backdrop-blur border border-white/20 text-white font-bold py-3 rounded-xl shadow-lg hover:bg-white/20 transition">
-                    {t('exchange')}
+                <button 
+                    onClick={handleExchange}
+                    disabled={loading || (user.wallet?.coins || 0) <= 0}
+                    className="mt-6 w-full bg-white/10 backdrop-blur border border-white/20 text-white font-bold py-3 rounded-xl shadow-lg hover:bg-white/20 transition disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                    {loading ? <Loader2 className="w-4 h-4 animate-spin"/> : t('exchange')}
                 </button>
             </div>
         </div>

@@ -1,5 +1,6 @@
+
 import React, { useState, useEffect, useRef } from 'react';
-import { ArrowLeft, Send, Heart, Share2, Gift as GiftIcon, Users, Crown, Mic, MicOff, Lock, Unlock, Settings, Image as ImageIcon, X, Info, Minimize2, LogOut, BadgeCheck, Loader2, Upload, Shield, Trophy, Bot, Volume2, VolumeX, ArrowDownCircle, Ban, Trash2, UserCog, UserMinus, Zap, BarChart3 } from 'lucide-react';
+import { ArrowLeft, Send, Heart, Share2, Gift as GiftIcon, Users, Crown, Mic, MicOff, Lock, Unlock, Settings, Image as ImageIcon, X, Info, Minimize2, LogOut, BadgeCheck, Loader2, Upload, Shield, Trophy, Bot, Volume2, VolumeX, ArrowDownCircle, Ban, Trash2, UserCog, UserMinus, Zap, BarChart3, Gamepad2 } from 'lucide-react';
 import { Room, ChatMessage, Gift, Language, User, RoomSeat } from '../types';
 import { GIFTS, STORE_ITEMS, ROOM_BACKGROUNDS, VIP_TIERS, ADMIN_ROLES } from '../constants';
 import { listenToMessages, sendMessage, takeSeat, leaveSeat, updateRoomDetails, sendGiftTransaction, toggleSeatLock, toggleSeatMute, decrementViewerCount, listenToRoom, kickUserFromSeat, banUserFromRoom, unbanUserFromRoom, removeRoomAdmin, addRoomAdmin, searchUserByDisplayId } from '../services/firebaseService';
@@ -50,9 +51,10 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
   const [settingsTab, setSettingsTab] = useState<'info' | 'background' | 'banned' | 'admins'>('info');
   const [bgType, setBgType] = useState<'inner' | 'outer'>('inner');
 
-  const [entryMessage, setEntryMessage] = useState<string | null>(null);
-  const [joinTimestamp] = useState<number>(Date.now());
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  
+  // Track join time to hide history
+  const joinTimestamp = useRef(Date.now());
 
   const pendingKickSeats = useRef<Set<number>>(new Set());
   const pendingBannedUsers = useRef<Set<string>>(new Set());
@@ -81,7 +83,7 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
                               pendingKickSeats.current.delete(serverSeat.index);
                               return serverSeat;
                           }
-                          return { ...serverSeat, userId: null, userName: null, userAvatar: null, giftCount: 0, adminRole: null, isMuted: false };
+                          return { ...serverSeat, userId: null, userName: null, userAvatar: null, giftCount: 0, adminRole: null, isMuted: false, frameId: undefined };
                       }
                       return serverSeat;
                   });
@@ -141,20 +143,26 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
   // --- AI HOST & ANIMATIONS ---
   useEffect(() => {
      if (!room || !room.id) return;
-     const unsubscribe = listenToMessages(room.id, (realTimeMsgs) => {
-         const newMsgs = realTimeMsgs.filter(m => m.timestamp > joinTimestamp);
-         setMessages(newMsgs);
+     
+     // Reset timestamp when entering/switching rooms to hide old history
+     joinTimestamp.current = Date.now();
 
-         // Check for animated gifts in new messages
-         const latestMsg = newMsgs[newMsgs.length - 1];
-         if (latestMsg && latestMsg.isGift && latestMsg.giftType === 'animated' && latestMsg.giftIcon) {
-             triggerAnimation(latestMsg.giftIcon, latestMsg.text.includes('Rocket') ? 'animate-fly-up' : 'animate-bounce-in'); // Defaulting fallback, usually handled by constants
+     const unsubscribe = listenToMessages(room.id, (realTimeMsgs) => {
+         // Filter out messages older than when the user joined the room session
+         const freshMessages = realTimeMsgs.filter(msg => msg.timestamp >= joinTimestamp.current);
+         setMessages(freshMessages);
+
+         // Check for animated gifts in new messages (last one)
+         const latestMsg = freshMessages[freshMessages.length - 1];
+         // Very basic check to avoid re-triggering animation on stale message load
+         if (latestMsg && latestMsg.isGift && latestMsg.giftType === 'animated' && latestMsg.giftIcon && (Date.now() - latestMsg.timestamp < 5000)) {
+             triggerAnimation(latestMsg.giftIcon, latestMsg.text.includes('Rocket') ? 'animate-fly-up' : 'animate-bounce-in');
          }
      });
      return () => {
          if (unsubscribe) unsubscribe();
      };
-  }, [room?.id, joinTimestamp]);
+  }, [room?.id]);
 
   const triggerAnimation = (icon: string, animationClass: string = 'animate-bounce-in') => {
       const id = Math.random().toString(36).substr(2, 9);
@@ -261,7 +269,7 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
       text: inputValue,
       timestamp: Date.now(),
       frameId: currentUser.equippedFrame || null, 
-      bubbleId: currentUser.equippedBubble || null,
+      bubbleId: currentUser.equippedBubble || null, // Bubble ID
       vipLevel: currentUser.vipLevel || 0,
       adminRole: currentUser.adminRole || null
     };
@@ -317,6 +325,7 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
           giftIcon: selectedGift.icon,
           timestamp: Date.now(),
           frameId: currentUser.equippedFrame || null,
+          bubbleId: currentUser.equippedBubble || null,
           vipLevel: currentUser.vipLevel || 0,
           adminRole: currentUser.adminRole || null
         };
@@ -348,7 +357,6 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
     }, 2000);
   };
 
-  // ... (handleSeatClick, confirmTakeSeat, handleToggleLock, handleUpdateRoom, etc. same as before) ...
   const handleSeatClick = async (index: number, currentSeatUserId: string | null) => {
       const seat = seats.find(s => s.index === index);
       const isLocked = seat?.isLocked;
@@ -389,12 +397,26 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
       setShowRoomSettings(false);
   };
 
-  const handleLeaveRoomAction = () => {
-      onAction('leave');
+  const handleLeaveRoomAction = async () => {
+      // Ensure seat leaving happens before component unmounts
+      if (mySeat) {
+          try {
+              await leaveSeat(room.id, currentUser);
+          } catch (e) {
+              console.error("Error leaving seat on exit:", e);
+          }
+      }
+      
+      try {
+          await decrementViewerCount(room.id);
+      } catch (e) {
+          console.error("Error decrementing viewer count:", e);
+      }
+
       unpublishMicrophone().catch(console.warn);
       leaveVoiceChannel().catch(console.warn);
-      if (mySeat) leaveSeat(room.id, currentUser).catch(console.error);
-      decrementViewerCount(room.id).catch(console.error);
+      
+      onAction('leave');
   };
 
   const handleToggleMyMute = async () => {
@@ -408,14 +430,18 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
       try { await toggleSeatMute(room.id, mySeat.index, nextMutedState); } catch (e) {}
   };
 
-  const handleLeaveSeat = () => {
+  const handleLeaveSeat = async () => {
       if (!mySeat) return;
       setRoom(prev => {
-          const newSeats = prev.seats.map(s => s.index === mySeat.index ? { ...s, userId: null, userName: null, userAvatar: null, giftCount: 0, adminRole: null, isMuted: false } : s);
+          const newSeats = prev.seats.map(s => s.index === mySeat.index ? { ...s, userId: null, userName: null, userAvatar: null, giftCount: 0, adminRole: null, isMuted: false, frameId: undefined } : s);
           return { ...prev, seats: newSeats };
       });
       unpublishMicrophone();
-      leaveSeat(room.id, currentUser);
+      try {
+          await leaveSeat(room.id, currentUser);
+      } catch (e) {
+          console.error("Error leaving seat:", e);
+      }
   };
 
   const handleToggleSpeaker = () => {
@@ -437,12 +463,11 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
       }
   };
 
-  // ... (Kick/Ban functions - same as previous optimized code) ...
   const handleKickSeat = (seatIndex: number) => {
       pendingKickSeats.current.add(seatIndex);
       setRoom(prev => {
           const newSeats = [...prev.seats];
-          if (newSeats[seatIndex]) newSeats[seatIndex] = { ...newSeats[seatIndex], userId: null, userName: null, userAvatar: null, giftCount: 0, adminRole: null, isMuted: false };
+          if (newSeats[seatIndex]) newSeats[seatIndex] = { ...newSeats[seatIndex], userId: null, userName: null, userAvatar: null, giftCount: 0, adminRole: null, isMuted: false, frameId: undefined };
           return { ...prev, seats: newSeats };
       });
       kickUserFromSeat(room.id, seatIndex);
@@ -463,10 +488,15 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
   const handleMakeAdmin = async (userId: string) => { await addRoomAdmin(room.id, userId); setSelectedUser(null); };
   const handleRemoveAdmin = async (userId: string) => { await removeRoomAdmin(room.id, userId); setSelectedUser(null); };
 
-  // --- RENDERING HELPERS ---
   const getFrameClass = (id?: string | null) => {
       if (!id) return 'border border-white/20';
       return STORE_ITEMS.find(i => i.id === id)?.previewClass || 'border border-white/20';
+  };
+
+  const getBubbleClass = (id?: string | null) => {
+      if (!id) return 'bg-white/10 text-white rounded-2xl'; // Default bubble
+      const item = STORE_ITEMS.find(i => i.id === id);
+      return item ? `${item.previewClass} rounded-2xl` : 'bg-white/10 text-white rounded-2xl';
   };
 
   const getVipTextStyle = (level: number) => {
@@ -494,7 +524,7 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
           </div>
       ))}
 
-      {/* 2. HEADER - Keep same logic as before ... */}
+      {/* 2. HEADER */}
       <div className="relative z-50 pt-safe-top px-3 pb-2 flex items-center justify-between gap-2 bg-gradient-to-b from-black/80 to-transparent w-full">
         <div className="flex items-center gap-2 min-w-0 flex-1">
             <button onClick={() => setShowExitModal(true)} className="shrink-0 p-2 bg-white/10 rounded-full hover:bg-white/20 backdrop-blur border border-white/5">
@@ -503,7 +533,10 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
             <div className="flex items-center gap-2 bg-black/30 backdrop-blur px-2 py-1 rounded-xl border border-white/10 min-w-0 max-w-full">
                 <img src={room.thumbnail} className="w-8 h-8 rounded-lg object-cover" />
                 <div className="text-white drop-shadow-md pr-1 min-w-0 flex flex-col justify-center">
-                    <h2 className="font-bold text-xs truncate leading-tight">{room.title}</h2>
+                    <div className="flex items-center gap-1">
+                        <h2 className="font-bold text-xs truncate leading-tight">{room.title}</h2>
+                        {room.isActivities && <Gamepad2 className="w-3 h-3 text-red-500 fill-white" />}
+                    </div>
                     <div className="text-[9px] text-gray-200 truncate">ID: {room.displayId || room.id.slice(-6)}</div>
                 </div>
             </div>
@@ -521,10 +554,10 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
           <div className="flex justify-center mb-4">
              {seats.slice(0, 1).map((seat) => (
                  <div key={seat.index} className="flex flex-col items-center relative group">
-                    <div onClick={() => handleSeatClick(seat.index, seat.userId)} className={`w-16 h-16 rounded-full border-2 ${seat.userId ? 'border-brand-500' : 'border-white/20 border-dashed'} flex items-center justify-center relative bg-black/40 backdrop-blur overflow-visible cursor-pointer transition transform hover:scale-105`}>
-                         {loadingSeatIndex === seat.index ? <Loader2 className="w-8 h-8 text-brand-500 animate-spin" /> : seat.userId ? (
+                    <div onClick={() => handleSeatClick(seat.index, seat.userId)} className={`w-16 h-16 rounded-full relative bg-black/40 backdrop-blur overflow-visible cursor-pointer transition transform hover:scale-105 p-[3px] ${seat.userId ? getFrameClass(seat.frameId) : 'border-2 border-white/20 border-dashed'}`}>
+                         {loadingSeatIndex === seat.index ? <Loader2 className="w-8 h-8 text-brand-500 animate-spin absolute inset-0 m-auto" /> : seat.userId ? (
                              <><img src={seat.userAvatar!} className="w-full h-full rounded-full object-cover" />{!seat.isMuted && <div className="absolute inset-0 rounded-full border-2 border-brand-400 animate-ping opacity-50"></div>}{seat.isMuted && <div className="absolute inset-0 rounded-full bg-black/50 flex items-center justify-center"><MicOff className="w-5 h-5 text-red-500"/></div>}<div className="absolute -top-3 -right-1 bg-yellow-500 p-1 rounded-full"><Crown className="w-3 h-3 text-black" /></div></>
-                         ) : <div className="text-gray-400 text-[10px] text-center">{t('host')}</div>}
+                         ) : <div className="text-gray-400 text-[10px] text-center w-full h-full flex items-center justify-center">{t('host')}</div>}
                     </div>
                     {seat.userId && <div className="mt-1 max-w-[70px] truncate text-[9px] text-white/90 bg-white/10 px-2 py-0.5 rounded-full">{seat.userName}</div>}
                     <div className="mt-0.5 bg-black/50 backdrop-blur px-2 py-0.5 rounded-full text-[8px] text-yellow-300 border border-yellow-500/30 flex items-center gap-1"><GiftIcon className="w-2 h-2" /> {seat.giftCount}</div>
@@ -535,7 +568,7 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
           <div className="grid grid-cols-5 gap-y-4 gap-x-2 justify-items-center">
              {seats.slice(1).map((seat) => (
                  <div key={seat.index} className="flex flex-col items-center w-full relative">
-                    <div onClick={() => handleSeatClick(seat.index, seat.userId)} className={`w-12 h-12 rounded-full border ${seat.userId ? 'border-brand-400' : 'border-white/10 border-dashed'} flex items-center justify-center relative bg-black/30 backdrop-blur`}>
+                    <div onClick={() => handleSeatClick(seat.index, seat.userId)} className={`w-12 h-12 rounded-full relative bg-black/30 backdrop-blur p-[2px] ${seat.userId ? getFrameClass(seat.frameId) : 'border border-white/10 border-dashed'} flex items-center justify-center`}>
                         {loadingSeatIndex === seat.index ? <Loader2 className="w-6 h-6 text-brand-500 animate-spin" /> : seat.userId ? (
                             <><img src={seat.userAvatar!} className="w-full h-full rounded-full object-cover" />{!seat.isMuted && <div className="absolute inset-0 rounded-full border border-green-400 animate-ping opacity-40"></div>}{seat.isMuted && <div className="absolute inset-0 rounded-full bg-black/50 flex items-center justify-center"><MicOff className="w-4 h-4 text-red-500"/></div>}</>
                         ) : (seat.isLocked ? <Lock className="w-4 h-4 text-red-400/70" /> : <span className="text-white/20 text-[10px] font-bold">{seat.index}</span>)}
@@ -602,6 +635,9 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
                       );
                   }
 
+                  // Determine Bubble Style
+                  const bubbleClass = getBubbleClass(msg.bubbleId);
+
                   return (
                       <div key={msg.id} className={`flex items-start gap-2 ${isMe ? 'flex-row-reverse' : ''} animate-in slide-in-from-bottom-2`}>
                           <div className={`relative w-8 h-8 shrink-0 p-[2px] rounded-full ${isAi ? 'border-2 border-brand-400 shadow-lg' : getFrameClass(msg.frameId)}`}>
@@ -615,7 +651,7 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
                                    {msg.adminRole && <span className={`text-[8px] px-1 rounded border flex items-center gap-0.5 ${msg.adminRole === 'super_admin' ? 'border-red-500 text-red-400 bg-red-900/30' : 'border-yellow-500 text-yellow-400 bg-yellow-900/30'}`}><Shield className="w-2 h-2" /> {msg.adminRole === 'super_admin' ? 'SUPER ADMIN' : 'ADMIN'}</span>}
                                    <span className={`text-[10px] font-bold flex items-center gap-1 ${getVipTextStyle(msg.vipLevel || 0)}`}>{msg.userName}{isOfficial && <BadgeCheck className="w-3 h-3 text-blue-500 fill-white inline" />}{isAi && <span className="text-[8px] bg-brand-600 text-white px-1 rounded">BOT</span>}</span>
                               </div>
-                              <div className={`px-3 py-1.5 rounded-2xl text-xs leading-relaxed text-white shadow-sm break-words border border-white/5 backdrop-blur-md ${isMe ? 'bg-brand-600/60 rounded-tr-none' : 'bg-white/10 rounded-tl-none'}`}>{msg.text}</div>
+                              <div className={`px-3 py-1.5 text-xs leading-relaxed text-white shadow-sm break-words border border-white/5 backdrop-blur-md ${bubbleClass} ${isMe ? 'rounded-tr-none' : 'rounded-tl-none'}`}>{msg.text}</div>
                           </div>
                       </div>
                   );

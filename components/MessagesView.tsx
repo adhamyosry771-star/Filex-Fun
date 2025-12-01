@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { ShieldCheck, ArrowLeft, Megaphone, Inbox, Clock, ChevronRight, UserPlus, Check, X, MessageCircle } from 'lucide-react';
 import { Language, Notification, FriendRequest, PrivateChatSummary } from '../types';
-import { listenToNotifications, listenToFriendRequests, acceptFriendRequest, rejectFriendRequest, listenToChatList } from '../services/firebaseService';
+import { listenToNotifications, listenToFriendRequests, acceptFriendRequest, rejectFriendRequest, listenToChatList, markSystemNotificationsRead, listenToUnreadNotifications } from '../services/firebaseService';
 import { auth } from '../firebaseConfig';
 import PrivateChatView from './PrivateChatView'; // Not used here directly, handled by App usually, but for internal logic check
 
@@ -17,6 +17,10 @@ const MessagesView: React.FC<MessagesViewProps> = ({ language, onOpenChat }) => 
   const [requests, setRequests] = useState<FriendRequest[]>([]);
   const [chats, setChats] = useState<PrivateChatSummary[]>([]);
   const [loading, setLoading] = useState(false);
+  
+  // Unread Counts for Menu
+  const [unreadSystem, setUnreadSystem] = useState(0);
+  const [unreadRequests, setUnreadRequests] = useState(0);
 
   const t = (key: string) => {
     const dict: Record<string, { ar: string, en: string }> = {
@@ -42,12 +46,28 @@ const MessagesView: React.FC<MessagesViewProps> = ({ language, onOpenChat }) => 
       if (!auth.currentUser) return;
       const uid = auth.currentUser.uid;
 
+      // Always listen to main counts when on main view
+      let reqUnsub: (() => void) | null = null;
+      let sysUnsub: (() => void) | null = null;
+
       if (subView === 'main') {
-          // Listen to Chats
+          // Listen to Chats List
           const unsub = listenToChatList(uid, (list) => {
               setChats(list);
           });
-          return () => unsub();
+          
+          // Listen to counts for badges
+          sysUnsub = listenToUnreadNotifications(uid, (count) => setUnreadSystem(count));
+          reqUnsub = listenToFriendRequests(uid, (reqs) => {
+              setRequests(reqs); // Needed for banner preview
+              setUnreadRequests(reqs.length);
+          });
+
+          return () => {
+              unsub();
+              if(sysUnsub) sysUnsub();
+              if(reqUnsub) reqUnsub();
+          };
       }
       else if (subView === 'requests') {
           setLoading(true);
@@ -58,7 +78,12 @@ const MessagesView: React.FC<MessagesViewProps> = ({ language, onOpenChat }) => 
           return () => unsub();
       } 
       else {
+          // System & Official
           setLoading(true);
+          if (subView === 'system') {
+              // Mark as read when entering system messages
+              markSystemNotificationsRead(uid);
+          }
           const unsub = listenToNotifications(uid, subView as 'system' | 'official', (msgs) => {
               setNotifications(msgs);
               setLoading(false);
@@ -177,8 +202,13 @@ const MessagesView: React.FC<MessagesViewProps> = ({ language, onOpenChat }) => 
           </div>
 
           <div onClick={() => setSubView('system')} className="bg-gradient-to-br from-gray-900 to-gray-800 border border-gray-700 rounded-3xl p-5 cursor-pointer hover:scale-[1.02] transition shadow-lg relative overflow-hidden group">
-             <div className="w-12 h-12 rounded-2xl bg-orange-500/20 flex items-center justify-center text-orange-400 mb-4 border border-orange-500/30">
+             <div className="w-12 h-12 rounded-2xl bg-orange-500/20 flex items-center justify-center text-orange-400 mb-4 border border-orange-500/30 relative">
                 <ShieldCheck className="w-6 h-6" />
+                {unreadSystem > 0 && (
+                    <div className="absolute -top-2 -right-2 bg-red-600 text-white text-[10px] font-bold w-5 h-5 flex items-center justify-center rounded-full border border-gray-800">
+                        {unreadSystem}
+                    </div>
+                )}
              </div>
              <h3 className="font-bold text-base text-white">{t('system')}</h3>
              <div className="flex items-center justify-between mt-2">
@@ -191,14 +221,21 @@ const MessagesView: React.FC<MessagesViewProps> = ({ language, onOpenChat }) => 
         {/* Requests Banner */}
         <div onClick={() => setSubView('requests')} className="bg-gray-800 border border-gray-700 rounded-2xl p-4 flex items-center justify-between cursor-pointer hover:bg-gray-700 transition mb-4">
             <div className="flex items-center gap-3">
-                <div className="p-2 bg-green-500/20 rounded-lg text-green-500"><UserPlus className="w-5 h-5"/></div>
+                <div className="p-2 bg-green-500/20 rounded-lg text-green-500 relative">
+                    <UserPlus className="w-5 h-5"/>
+                    {unreadRequests > 0 && (
+                        <div className="absolute -top-1 -right-1 bg-red-600 text-white text-[9px] font-bold w-4 h-4 flex items-center justify-center rounded-full border border-gray-800">
+                            {unreadRequests}
+                        </div>
+                    )}
+                </div>
                 <div>
                     <h3 className="font-bold text-sm">{t('requests')}</h3>
                     <p className="text-[10px] text-gray-400">{t('requestsDesc')}</p>
                 </div>
             </div>
-            {requests.length > 0 && (
-                <div className="bg-red-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">{requests.length}</div>
+            {unreadRequests > 0 && (
+                <div className="bg-red-500 text-white text-xs font-bold px-3 py-1 rounded-full">{unreadRequests} New</div>
             )}
             <ChevronRight className="w-5 h-5 text-gray-500 rtl:rotate-180" />
         </div>

@@ -178,6 +178,10 @@ export const toggleRoomActivitiesStatus = async (roomId: string, isActivities: b
   await updateDoc(doc(db, 'rooms', roomId), { isActivities });
 };
 
+export const toggleRoomOfficialStatus = async (roomId: string, isOfficial: boolean) => {
+  await updateDoc(doc(db, 'rooms', roomId), { isOfficial });
+};
+
 export const sendSystemNotification = async (uid: string, title: string, body: string) => {
   const notif: Notification = {
     id: Date.now().toString(),
@@ -213,7 +217,7 @@ export const createRoom = async (title: string, thumbnail: string, host: User, h
         thumbnail,
         tags: [],
         isAiHost: false,
-        // CHANGED: Initialize 11 seats (1 Host + 10 Guests)
+        // Initialize 11 seats (1 Host + 10 Guests)
         seats: Array(11).fill(null).map((_, i) => ({ 
             index: i, 
             userId: null, 
@@ -253,12 +257,13 @@ export const listenToRoom = (roomId: string, callback: (room: Room | null) => vo
     });
 };
 
-export const getRoomByHostId = async (hostUid: string): Promise<Room | null> => {
+export const getRoomsByHostId = async (hostUid: string): Promise<Room[]> => {
     const user = await getUserProfile(hostUid);
-    if (!user) return null;
+    if (!user) return [];
+    // Changed to fetch ALL rooms for this hostId
     const q = query(collection(db, 'rooms'), where('hostId', '==', user.id));
     const snap = await getDocs(q);
-    return snap.empty ? null : (snap.docs[0].data() as Room);
+    return snap.docs.map(doc => doc.data() as Room);
 };
 
 export const updateRoomDetails = async (roomId: string, updates: Partial<Room>) => {

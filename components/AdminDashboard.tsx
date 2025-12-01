@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
-import { Shield, Trash2, Ban, Search, Gift, Crown, ArrowLeft, RefreshCw, CheckCircle, Megaphone, Edit3, Send, Home, XCircle, Flame, Image as ImageIcon, Plus, X, Database, Clock, Gamepad2 } from 'lucide-react';
-import { getAllUsers, adminUpdateUser, deleteAllRooms, sendSystemNotification, broadcastOfficialMessage, searchUserByDisplayId, getRoomByHostId, adminBanRoom, deleteRoom, toggleRoomHotStatus, toggleRoomActivitiesStatus, addBanner, deleteBanner, listenToBanners, syncRoomIdsWithUserIds } from '../services/firebaseService';
+import { Shield, Trash2, Ban, Search, Gift, Crown, ArrowLeft, RefreshCw, CheckCircle, Megaphone, Edit3, Send, Home, XCircle, Flame, Image as ImageIcon, Plus, X, Database, Clock, Gamepad2, BadgeCheck } from 'lucide-react';
+import { getAllUsers, adminUpdateUser, deleteAllRooms, sendSystemNotification, broadcastOfficialMessage, searchUserByDisplayId, getRoomsByHostId, adminBanRoom, deleteRoom, toggleRoomHotStatus, toggleRoomActivitiesStatus, addBanner, deleteBanner, listenToBanners, syncRoomIdsWithUserIds, toggleRoomOfficialStatus } from '../services/firebaseService';
 import { Language, User, Room, Banner } from '../types';
 import { VIP_TIERS, ADMIN_ROLES } from '../constants';
 
@@ -19,7 +19,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, language }) => 
   
   // Search Results
   const [searchedUser, setSearchedUser] = useState<User | null>(null);
-  const [searchedRoom, setSearchedRoom] = useState<Room | null>(null);
+  const [searchedRooms, setSearchedRooms] = useState<Room[]>([]); // Changed to Array
 
   // Banners
   const [banners, setBanners] = useState<Banner[]>([]);
@@ -58,16 +58,16 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, language }) => 
       if(!searchTerm) return;
       setLoading(true);
       setSearchedUser(null);
-      setSearchedRoom(null);
+      setSearchedRooms([]);
 
       // Search User
       const user = await searchUserByDisplayId(searchTerm);
       if (user) {
           setSearchedUser(user);
-          // If user found, find their room (if exists)
+          // If user found, find ALL their rooms
           if (user.uid) {
-              const room = await getRoomByHostId(user.uid);
-              setSearchedRoom(room);
+              const rooms = await getRoomsByHostId(user.uid);
+              setSearchedRooms(rooms);
           }
       }
       setLoading(false);
@@ -145,12 +145,10 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, language }) => 
 
   const handleBanRoom = async (roomId: string, currentStatus: boolean) => {
       if (!roomId) return;
-      setActionLoading('room_ban');
+      setActionLoading('room_ban_' + roomId);
       try {
           await adminBanRoom(roomId, !currentStatus);
-          if (searchedRoom && searchedRoom.id === roomId) {
-              setSearchedRoom({...searchedRoom, isBanned: !currentStatus});
-          }
+          setSearchedRooms(prev => prev.map(r => r.id === roomId ? { ...r, isBanned: !currentStatus } : r));
           alert(currentStatus ? "تم فك حظر الغرفة" : "تم حظر الغرفة");
       } catch (e) {
           alert("فشل حظر الغرفة");
@@ -160,12 +158,10 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, language }) => 
 
   const handleToggleHot = async (roomId: string, currentStatus: boolean) => {
       if (!roomId) return;
-      setActionLoading('room_hot');
+      setActionLoading('room_hot_' + roomId);
       try {
           await toggleRoomHotStatus(roomId, !currentStatus);
-          if (searchedRoom && searchedRoom.id === roomId) {
-              setSearchedRoom({...searchedRoom, isHot: !currentStatus});
-          }
+          setSearchedRooms(prev => prev.map(r => r.id === roomId ? { ...r, isHot: !currentStatus } : r));
           alert(currentStatus ? "تم إزالة HOT" : "تم تعيين كـ HOT");
       } catch (e) {
           alert("فشل التحديث");
@@ -175,13 +171,24 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, language }) => 
 
   const handleToggleActivities = async (roomId: string, currentStatus: boolean) => {
       if (!roomId) return;
-      setActionLoading('room_activities');
+      setActionLoading('room_activities_' + roomId);
       try {
           await toggleRoomActivitiesStatus(roomId, !currentStatus);
-          if (searchedRoom && searchedRoom.id === roomId) {
-              setSearchedRoom({...searchedRoom, isActivities: !currentStatus});
-          }
+          setSearchedRooms(prev => prev.map(r => r.id === roomId ? { ...r, isActivities: !currentStatus } : r));
           alert(currentStatus ? "تم إزالة شارة الأنشطة" : "تم إضافة شارة الأنشطة");
+      } catch (e) {
+          alert("فشل التحديث");
+      }
+      setActionLoading(null);
+  };
+
+  const handleToggleOfficial = async (roomId: string, currentStatus: boolean) => {
+      if (!roomId) return;
+      setActionLoading('room_official_' + roomId);
+      try {
+          await toggleRoomOfficialStatus(roomId, !currentStatus);
+          setSearchedRooms(prev => prev.map(r => r.id === roomId ? { ...r, isOfficial: !currentStatus } : r));
+          alert(currentStatus ? "تم إزالة الشارة الرسمية" : "تم منح الشارة الرسمية");
       } catch (e) {
           alert("فشل التحديث");
       }
@@ -190,10 +197,10 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, language }) => 
 
   const handleDeleteSingleRoom = async (roomId: string) => {
       if (!confirm("هل أنت متأكد من حذف هذه الغرفة نهائياً؟")) return;
-      setActionLoading('room_del');
+      setActionLoading('room_del_' + roomId);
       try {
           await deleteRoom(roomId);
-          setSearchedRoom(null);
+          setSearchedRooms(prev => prev.filter(r => r.id !== roomId));
           alert("تم حذف الغرفة");
       } catch (e) {
           alert("فشل الحذف");
@@ -399,7 +406,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, language }) => 
       }
   };
 
-  // Improved Image Uploader with Compression to fix Firestore 1MB limit issue
+  // Improved Image Uploader with Compression
   const handleBannerUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
       if (!file) return;
@@ -519,7 +526,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, language }) => 
               <div className="flex-1 overflow-y-auto p-4 space-y-6">
                   
                   {/* Search Result Section */}
-                  {(searchedUser || searchedRoom) && (
+                  {(searchedUser || searchedRooms.length > 0) && (
                       <div className="bg-gray-800/50 border border-gold-500/30 rounded-xl p-4 mb-4">
                           <h3 className="text-gold-300 font-bold mb-3 border-b border-gray-700 pb-2">نتائج البحث</h3>
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -574,35 +581,42 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, language }) => 
                                   </div>
                               ) : <div className="text-gray-500 p-4">لم يتم العثور على مستخدم</div>}
 
-                              {/* Room Card */}
-                              {searchedRoom ? (
-                                  <div className={`bg-black p-4 rounded-xl border ${searchedRoom.isBanned ? 'border-red-600' : 'border-gray-700'}`}>
-                                      <div className="flex items-center gap-3 mb-3">
-                                          <img src={searchedRoom.thumbnail} className="w-12 h-12 rounded-lg object-cover" />
-                                          <div>
-                                              <div className="font-bold text-white text-sm">{searchedRoom.title}</div>
-                                              <div className="text-xs text-gray-500">Host ID: {searchedRoom.displayId}</div>
+                              {/* Rooms List */}
+                              <div className="space-y-2">
+                                  <h4 className="text-gold-400 font-bold text-sm">غرف المستخدم ({searchedRooms.length})</h4>
+                                  {searchedRooms.length > 0 ? searchedRooms.map(room => (
+                                      <div key={room.id} className={`bg-black p-4 rounded-xl border ${room.isBanned ? 'border-red-600' : 'border-gray-700'}`}>
+                                          <div className="flex items-center gap-3 mb-3">
+                                              <img src={room.thumbnail} className="w-12 h-12 rounded-lg object-cover" />
+                                              <div>
+                                                  <div className="font-bold text-white text-sm">{room.title}</div>
+                                                  <div className="text-xs text-gray-500">Host ID: {room.displayId}</div>
+                                              </div>
+                                              {room.isBanned && <span className="mr-auto bg-red-600 text-white text-[10px] px-2 py-1 rounded font-bold">غرفة محظورة</span>}
+                                              {room.isHot && <span className="bg-red-600/20 text-red-500 text-[10px] px-2 py-1 rounded font-bold border border-red-500/50 flex items-center gap-1"><Flame className="w-3 h-3"/> HOT</span>}
+                                              {room.isActivities && <span className="bg-blue-600/20 text-blue-500 text-[10px] px-2 py-1 rounded font-bold border border-blue-500/50 flex items-center gap-1"><Gamepad2 className="w-3 h-3"/> ACT</span>}
+                                              {room.isOfficial && <span className="bg-blue-600/20 text-blue-500 text-[10px] px-2 py-1 rounded font-bold border border-blue-500/50 flex items-center gap-1"><BadgeCheck className="w-3 h-3"/> OFF</span>}
                                           </div>
-                                          {searchedRoom.isBanned && <span className="mr-auto bg-red-600 text-white text-[10px] px-2 py-1 rounded font-bold">غرفة محظورة</span>}
-                                          {searchedRoom.isHot && <span className="bg-red-600/20 text-red-500 text-[10px] px-2 py-1 rounded font-bold border border-red-500/50 flex items-center gap-1"><Flame className="w-3 h-3"/> HOT</span>}
-                                          {searchedRoom.isActivities && <span className="bg-blue-600/20 text-blue-500 text-[10px] px-2 py-1 rounded font-bold border border-blue-500/50 flex items-center gap-1"><Gamepad2 className="w-3 h-3"/> ACT</span>}
+                                          <div className="grid grid-cols-2 gap-2">
+                                               <button onClick={() => handleBanRoom(room.id, room.isBanned || false)} className={`py-1.5 rounded text-xs flex items-center justify-center gap-1 ${room.isBanned ? 'bg-green-600 text-white' : 'bg-red-600 text-white'}`}>
+                                                  {room.isBanned ? 'فك حظر الغرفة' : 'حظر الغرفة'}
+                                              </button>
+                                              <button onClick={() => handleToggleHot(room.id, room.isHot || false)} className={`py-1.5 rounded text-xs flex items-center justify-center gap-1 ${room.isHot ? 'bg-orange-600/20 text-orange-500 border border-orange-600' : 'bg-gray-800 text-gray-400'}`}>
+                                                  {room.isHot ? 'إزالة HOT' : 'تعيين كـ HOT'}
+                                              </button>
+                                              <button onClick={() => handleToggleActivities(room.id, room.isActivities || false)} className={`py-1.5 rounded text-xs flex items-center justify-center gap-1 ${room.isActivities ? 'bg-red-600/20 text-red-500 border border-red-600' : 'bg-gray-800 text-gray-400'}`}>
+                                                  <Gamepad2 className="w-3 h-3"/> {room.isActivities ? 'إزالة شارة الأنشطة' : 'إضافة شارة الأنشطة'}
+                                              </button>
+                                               <button onClick={() => handleToggleOfficial(room.id, room.isOfficial || false)} className={`py-1.5 rounded text-xs flex items-center justify-center gap-1 ${room.isOfficial ? 'bg-blue-600/20 text-blue-500 border border-blue-600' : 'bg-gray-800 text-gray-400'}`}>
+                                                  <BadgeCheck className="w-3 h-3"/> {room.isOfficial ? 'إزالة الرسمية' : 'تعيين رسمي'}
+                                              </button>
+                                              <button onClick={() => handleDeleteSingleRoom(room.id)} className="col-span-2 bg-red-900/50 text-red-500 border border-red-900 py-1.5 rounded text-xs flex items-center justify-center gap-1">
+                                                  حذف الغرفة
+                                              </button>
+                                          </div>
                                       </div>
-                                      <div className="grid grid-cols-2 gap-2">
-                                           <button onClick={() => handleBanRoom(searchedRoom.id, searchedRoom.isBanned || false)} className={`py-1.5 rounded text-xs flex items-center justify-center gap-1 ${searchedRoom.isBanned ? 'bg-green-600 text-white' : 'bg-red-600 text-white'}`}>
-                                              {searchedRoom.isBanned ? 'فك حظر الغرفة' : 'حظر الغرفة'}
-                                          </button>
-                                          <button onClick={() => handleToggleHot(searchedRoom.id, searchedRoom.isHot || false)} className={`py-1.5 rounded text-xs flex items-center justify-center gap-1 ${searchedRoom.isHot ? 'bg-orange-600/20 text-orange-500 border border-orange-600' : 'bg-gray-800 text-gray-400'}`}>
-                                              {searchedRoom.isHot ? 'إزالة HOT' : 'تعيين كـ HOT'}
-                                          </button>
-                                          <button onClick={() => handleToggleActivities(searchedRoom.id, searchedRoom.isActivities || false)} className={`col-span-2 py-1.5 rounded text-xs flex items-center justify-center gap-1 ${searchedRoom.isActivities ? 'bg-red-600/20 text-red-500 border border-red-600' : 'bg-gray-800 text-gray-400'}`}>
-                                              <Gamepad2 className="w-3 h-3"/> {searchedRoom.isActivities ? 'إزالة شارة الأنشطة' : 'إضافة شارة الأنشطة'}
-                                          </button>
-                                          <button onClick={() => handleDeleteSingleRoom(searchedRoom.id)} className="col-span-2 bg-red-900/50 text-red-500 border border-red-900 py-1.5 rounded text-xs flex items-center justify-center gap-1">
-                                              حذف الغرفة
-                                          </button>
-                                      </div>
-                                  </div>
-                              ) : <div className="text-gray-500 p-4 border border-gray-800 rounded-xl flex flex-col items-center justify-center"><Home className="w-8 h-8 mb-2 opacity-50"/>هذا المستخدم لا يملك غرفة</div>}
+                                  )) : <div className="text-gray-500 p-4 border border-gray-800 rounded-xl flex flex-col items-center justify-center"><Home className="w-8 h-8 mb-2 opacity-50"/>هذا المستخدم لا يملك غرف</div>}
+                              </div>
                           </div>
                       </div>
                   )}

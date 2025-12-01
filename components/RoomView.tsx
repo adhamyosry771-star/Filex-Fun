@@ -33,6 +33,9 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
   // Animation State
   const [activeAnimations, setActiveAnimations] = useState<{id: string, icon: string, class: string}[]>([]);
 
+  // Join Notification State
+  const [joinNotification, setJoinNotification] = useState<{name: string, id: string} | null>(null);
+
   const [showRoomSettings, setShowRoomSettings] = useState(false);
   const [showExitModal, setShowExitModal] = useState(false);
   const [showUserList, setShowUserList] = useState(false);
@@ -58,6 +61,7 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
   
   // Track join time to hide history
   const joinTimestamp = useRef(Date.now());
+  const hasSentJoinMsg = useRef(false);
 
   const pendingKickSeats = useRef<Set<number>>(new Set());
   const pendingBannedUsers = useRef<Set<string>>(new Set());
@@ -75,7 +79,7 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
       return (room.seats && room.seats[i]) ? room.seats[i] : { 
           index: i, 
           userId: null, 
-          userName: null,
+          userName: null, 
           userAvatar: null,
           isMuted: false, 
           isLocked: false, 
@@ -110,12 +114,37 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
       };
   }, [room.id]); // Keep dependency stable
 
+  // --- SEND JOIN MESSAGE ON MOUNT ---
+  useEffect(() => {
+      if (hasSentJoinMsg.current || !room.id || !currentUser.uid) return;
+      hasSentJoinMsg.current = true;
+
+      const sendJoin = async () => {
+          try {
+              const msg: ChatMessage = {
+                  id: Date.now().toString(),
+                  userId: currentUser.id,
+                  userName: currentUser.name,
+                  userAvatar: currentUser.avatar,
+                  text: 'JOINED_ROOM',
+                  timestamp: Date.now(),
+                  isJoin: true,
+                  vipLevel: currentUser.vipLevel,
+                  adminRole: currentUser.adminRole
+              };
+              await sendMessage(room.id, msg);
+          } catch(e) {
+              console.error("Join msg failed", e);
+          }
+      };
+      sendJoin();
+  }, [room.id, currentUser.uid]);
+
   // --- LISTEN TO ROOM UPDATES ---
   useEffect(() => {
       const unsubscribe = listenToRoom(initialRoom.id, (updatedRoom) => {
           if (updatedRoom) {
               setRoom(prevRoom => {
-                  // Adjust seats array to match 11
                   const existingSeats = updatedRoom.seats || [];
                   const adjustedSeats = Array(11).fill(null).map((_, i) => existingSeats[i] || { 
                       index: i, 
@@ -155,7 +184,6 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
               }
 
               if (updatedRoom.bannedUsers && updatedRoom.bannedUsers.includes(currentUser.uid!)) {
-                  // Banned logic
                   onAction('leave');
               }
 
@@ -171,10 +199,8 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
   const mySeatMuted = mySeat?.isMuted;
   const amISeated = !!mySeat;
 
-  // Optimized Effect: Logic to manage mic state without blocking UI
   useEffect(() => {
       if (amISeated) {
-          // Fire and forget - don't await to prevent UI block
           publishMicrophone(!!mySeatMuted).catch(err => {
               console.warn("Mic publish info:", err);
           });
@@ -186,18 +212,33 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
       }
   }, [amISeated, mySeatMuted, loadingSeatIndex]);
 
-  // --- AI HOST & ANIMATIONS ---
+  // --- LISTEN TO MESSAGES & ANIMATIONS ---
   useEffect(() => {
      if (!room || !room.id) return;
      joinTimestamp.current = Date.now();
 
      const unsubscribe = listenToMessages(room.id, (realTimeMsgs) => {
-         const freshMessages = realTimeMsgs.filter(msg => msg.timestamp >= joinTimestamp.current);
-         setMessages(freshMessages);
+         // Filter messages for display (excluding Join messages from main chat list)
+         const displayMessages = realTimeMsgs.filter(msg => 
+             msg.timestamp >= joinTimestamp.current && !msg.isJoin
+         );
+         setMessages(displayMessages);
 
-         const latestMsg = freshMessages[freshMessages.length - 1];
-         if (latestMsg && latestMsg.isGift && latestMsg.giftType === 'animated' && latestMsg.giftIcon && (Date.now() - latestMsg.timestamp < 5000)) {
-             triggerAnimation(latestMsg.giftIcon, latestMsg.text.includes('Rocket') ? 'animate-fly-up' : 'animate-bounce-in');
+         // Handle Join Notifications & Animations (from raw stream)
+         const latestMsg = realTimeMsgs[realTimeMsgs.length - 1];
+         const now = Date.now();
+
+         if (latestMsg && (now - latestMsg.timestamp < 3000)) {
+             // Join Notification Logic
+             if (latestMsg.isJoin && (!joinNotification || joinNotification.id !== latestMsg.id)) {
+                 setJoinNotification({ name: latestMsg.userName, id: latestMsg.id });
+                 setTimeout(() => setJoinNotification(null), 3000);
+             }
+
+             // Animation Logic
+             if (latestMsg.isGift && latestMsg.giftType === 'animated' && latestMsg.giftIcon) {
+                 triggerAnimation(latestMsg.giftIcon, latestMsg.text.includes('Rocket') ? 'animate-fly-up' : 'animate-bounce-in');
+             }
          }
      });
      return () => {
@@ -292,6 +333,8 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
       static: { ar: 'كلاسيك', en: 'Classic' },
       animated: { ar: 'متحركة', en: 'Animated' },
       selectGift: { ar: 'اختر هدية', en: 'Select Gift' },
+      welcome: { ar: 'مرحبا ب', en: 'Welcome' },
+      entered: { ar: 'لقد دخل الغرفة', en: 'has entered the room' }
     };
     return dict[key]?.[language] || key;
   };
@@ -437,12 +480,8 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
       setShowRoomSettings(false);
   };
 
-  // --- OPTIMIZED EXIT FUNCTION ---
   const handleLeaveRoomAction = () => {
-      // 1. Immediate UI Switch (Optimistic UI) - Zero delay for the user
       onAction('leave');
-
-      // 2. Perform heavy cleanup in background (Fire and forget)
       const performCleanup = async () => {
           try {
               if (isSeatedRef.current && currentUserRef.current) {
@@ -452,12 +491,9 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
           } catch (e) {
               console.error("Background cleanup error:", e);
           }
-          // Agora cleanup is synchronous/fast in our optimized service
           unpublishMicrophone();
           leaveVoiceChannel();
       };
-      
-      // Execute cleanup without awaiting it in the main flow
       performCleanup();
   };
 
@@ -659,7 +695,7 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
               </div>
           </div>
 
-          <div className="flex-1 overflow-y-auto px-4 space-y-2 scrollbar-hide pb-2 mask-image-gradient">
+          <div className="flex-1 overflow-y-auto px-4 space-y-2 scrollbar-hide pb-2 mask-image-gradient relative">
               {messages.map((msg) => {
                   const isMe = msg.userId === currentUser.id;
                   const isOfficial = msg.userId === 'OFFECAL' || (msg.userId === room.hostId && room.hostId === 'OFFECAL');
@@ -678,7 +714,6 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
                       );
                   }
 
-                  // Determine Bubble Style
                   const bubbleClass = getBubbleClass(msg.bubbleId);
 
                   return (
@@ -699,6 +734,17 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
                       </div>
                   );
               })}
+              
+              {/* JOIN NOTIFICATION BANNER */}
+              {joinNotification && (
+                  <div className="sticky bottom-2 left-0 right-0 flex justify-center z-50 animate-in slide-in-from-bottom-5 fade-in duration-300">
+                      <div className="bg-black/60 backdrop-blur-md border border-white/10 px-4 py-1.5 rounded-full shadow-xl flex items-center gap-2">
+                          <span className="text-yellow-400 font-black text-xs drop-shadow-sm">{t('welcome')} {joinNotification.name}</span>
+                          <span className="text-white text-[10px] font-medium">{t('entered')}</span>
+                      </div>
+                  </div>
+              )}
+              
               <div ref={messagesEndRef} />
           </div>
 

@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
-import { Shield, Trash2, Ban, Search, Gift, Crown, ArrowLeft, RefreshCw, CheckCircle, Megaphone, Edit3, Send, Home, XCircle, Flame, Image as ImageIcon, Plus, X, Database, Clock, Gamepad2, BadgeCheck } from 'lucide-react';
-import { getAllUsers, adminUpdateUser, deleteAllRooms, sendSystemNotification, broadcastOfficialMessage, searchUserByDisplayId, getRoomsByHostId, adminBanRoom, deleteRoom, toggleRoomHotStatus, toggleRoomActivitiesStatus, addBanner, deleteBanner, listenToBanners, syncRoomIdsWithUserIds, toggleRoomOfficialStatus } from '../services/firebaseService';
+import { Shield, Trash2, Ban, Search, Gift, Crown, ArrowLeft, RefreshCw, CheckCircle, Megaphone, Edit3, Send, Home, XCircle, Flame, Image as ImageIcon, Plus, X, Database, Clock, Gamepad2, BadgeCheck, Coins } from 'lucide-react';
+import { getAllUsers, adminUpdateUser, deleteAllRooms, sendSystemNotification, broadcastOfficialMessage, searchUserByDisplayId, getRoomsByHostId, adminBanRoom, deleteRoom, toggleRoomHotStatus, toggleRoomActivitiesStatus, addBanner, deleteBanner, listenToBanners, syncRoomIdsWithUserIds, toggleRoomOfficialStatus, resetAllUsersCoins } from '../services/firebaseService';
 import { Language, User, Room, Banner } from '../types';
 import { VIP_TIERS, ADMIN_ROLES } from '../constants';
 
@@ -383,6 +383,18 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, language }) => 
       setActionLoading(null);
   };
 
+  const handleResetAllCoins = async () => {
+      if (!confirm("⚠️ تحذير خطير: هل أنت متأكد تماماً من تصفير رصيد الكوينز لجميع المستخدمين في التطبيق؟ هذا الإجراء لا يمكن التراجع عنه.")) return;
+      setActionLoading('reset_coins');
+      try {
+          await resetAllUsersCoins();
+          alert("تم تصفير كوينز الجميع بنجاح!");
+      } catch (e) {
+          alert("حدث خطأ أثناء التصفير");
+      }
+      setActionLoading(null);
+  };
+
   const handleAddBanner = async () => {
       if (!newBannerImage) return;
       setActionLoading('add_banner');
@@ -406,7 +418,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, language }) => 
       }
   };
 
-  // Improved Image Uploader with Compression
+  // Improved Image Uploader with Aggressive Compression
   const handleBannerUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
       if (!file) return;
@@ -415,33 +427,34 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, language }) => 
       reader.onload = (event) => {
           const img = new Image();
           img.onload = () => {
-              // Create Canvas for Compression
               const canvas = document.createElement('canvas');
               let width = img.width;
               let height = img.height;
 
-              // Max Width Constraint
-              const MAX_WIDTH = 800;
-              if (width > MAX_WIDTH) {
-                  height = (height * MAX_WIDTH) / width;
-                  width = MAX_WIDTH;
+              // Constrain dimensions to ensure small file size
+              const MAX_WIDTH = 700;
+              const MAX_HEIGHT = 400; 
+
+              let ratio = 1;
+              if (width > MAX_WIDTH || height > MAX_HEIGHT) {
+                  const widthRatio = MAX_WIDTH / width;
+                  const heightRatio = MAX_HEIGHT / height;
+                  ratio = Math.min(widthRatio, heightRatio);
               }
 
-              canvas.width = width;
-              canvas.height = height;
+              const newWidth = width * ratio;
+              const newHeight = height * ratio;
+
+              canvas.width = newWidth;
+              canvas.height = newHeight;
               const ctx = canvas.getContext('2d');
               
               if (ctx) {
-                  ctx.drawImage(img, 0, 0, width, height);
-                  // Compress to JPEG with 0.6 quality
-                  const dataUrl = canvas.toDataURL('image/jpeg', 0.6);
+                  ctx.drawImage(img, 0, 0, newWidth, newHeight);
+                  // Compress to JPEG with 0.5 quality (Aggressive compression)
+                  const dataUrl = canvas.toDataURL('image/jpeg', 0.5);
                   
-                  // Check final size
-                  if (dataUrl.length > 1000000) { // Approx 1MB limit for safety
-                      alert("الصورة لا تزال كبيرة جداً، يرجى اختيار صورة أخرى.");
-                      return;
-                  }
-                  
+                  // Set image directly without error alerts
                   setNewBannerImage(dataUrl);
               }
           };
@@ -784,9 +797,17 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, language }) => 
               <div className="bg-red-900/10 p-6 rounded-2xl border border-red-900/50 max-w-sm w-full text-center">
                   <Trash2 className="w-16 h-16 text-red-500 mx-auto mb-4" />
                   <h2 className="text-xl font-bold text-red-500 mb-2">منطقة الخطر</h2>
-                  <button onClick={() => handleDeleteRooms()} disabled={actionLoading === 'system'} className="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-3 rounded-lg mt-4">
-                      {actionLoading === 'system' ? 'جاري الحذف...' : 'حذف جميع الرومات'}
-                  </button>
+                  
+                  <div className="space-y-3">
+                      <button onClick={() => handleDeleteRooms()} disabled={actionLoading === 'system'} className="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-3 rounded-lg mt-4">
+                          {actionLoading === 'system' ? 'جاري الحذف...' : 'حذف جميع الرومات'}
+                      </button>
+
+                      <button onClick={handleResetAllCoins} disabled={actionLoading === 'reset_coins'} className="w-full bg-orange-600 hover:bg-orange-700 text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2">
+                          <Coins className="w-5 h-5"/>
+                          {actionLoading === 'reset_coins' ? 'جاري التصفير...' : 'تصفير كوينز الجميع'}
+                      </button>
+                  </div>
               </div>
 
               <div className="bg-gray-800/50 p-6 rounded-2xl border border-gray-700 max-w-sm w-full text-center">

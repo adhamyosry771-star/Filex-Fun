@@ -269,7 +269,8 @@ const HomeView: React.FC<HomeViewProps> = ({ rooms, onJoinRoom, language, userPr
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
                 {filteredRooms.map((room) => {
                     // Styles for special rooms
-                    const isOfficial = room.isOfficial || room.displayId === 'OFFECAL';
+                    // UPDATED: Now strictly follows the DB flags, removed manual override
+                    const isOfficial = room.isOfficial;
                     const isActivities = room.isActivities;
                     
                     const containerClass = isOfficial 

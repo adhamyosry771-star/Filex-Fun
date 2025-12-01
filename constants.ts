@@ -117,23 +117,36 @@ export const VIP_TIERS: VipTier[] = [
 ];
 
 export const GIFTS: Gift[] = [
-  // Static Gifts
+  // --- Static Gifts (Classic) ---
   { id: 'rose', name: 'Rose', icon: '🌹', cost: 1, type: 'static' },
+  { id: 'coffee', name: 'Coffee', icon: '☕', cost: 2, type: 'static' },
   { id: 'heart', name: 'Heart', icon: '❤️', cost: 5, type: 'static' },
-  { id: 'chocolate', name: 'Chocolate', icon: '🍫', cost: 10, type: 'static' },
-  { id: 'star', name: 'Star', icon: '⭐', cost: 20, type: 'static' },
+  { id: 'kiss', name: 'Kiss', icon: '💋', cost: 10, type: 'static' },
+  { id: 'chocolate', name: 'Chocolate', icon: '🍫', cost: 15, type: 'static' },
+  { id: 'mic', name: 'Mic', icon: '🎤', cost: 20, type: 'static' },
+  { id: 'perfume', name: 'Perfume', icon: '🧴', cost: 30, type: 'static' },
   { id: 'diamond', name: 'Diamond', icon: '💎', cost: 50, type: 'static' },
-  { id: 'crown', name: 'Crown', icon: '👑', cost: 100, type: 'static' },
-  
-  // Animated Gifts
+  { id: 'ring', name: 'Ring', icon: '💍', cost: 66, type: 'static' },
+  { id: 'crown', name: 'Crown', icon: '👑', cost: 99, type: 'static' },
+  { id: 'trophy', name: 'Trophy', icon: '🏆', cost: 150, type: 'static' },
+  { id: 'bag', name: 'Luxury Bag', icon: '👜', cost: 200, type: 'static' },
+  { id: 'watch', name: 'Gold Watch', icon: '⌚', cost: 300, type: 'static' },
+  { id: 'safe', name: 'Vault', icon: '🏦', cost: 400, type: 'static' },
+
+  // --- Animated Gifts (Premium) ---
   { id: 'car', name: 'Sports Car', icon: '🏎️', cost: 500, type: 'animated', animationClass: 'animate-slide-across' },
+  { id: 'motorcycle', name: 'Super Bike', icon: '🏍️', cost: 800, type: 'animated', animationClass: 'animate-slide-across' },
   { id: 'rocket', name: 'Rocket', icon: '🚀', cost: 1000, type: 'animated', animationClass: 'animate-fly-up' },
-  { id: 'dragon', name: 'Dragon', icon: '🐉', cost: 5000, type: 'animated', animationClass: 'animate-dragon-breath' },
-  { id: 'planet', name: 'Planet', icon: '🪐', cost: 2000, type: 'animated', animationClass: 'animate-spin-slow' },
+  { id: 'yacht', name: 'Yacht', icon: '🛥️', cost: 2000, type: 'animated', animationClass: 'animate-bounce-in' },
   { id: 'lion', name: 'Golden Lion', icon: '🦁', cost: 3000, type: 'animated', animationClass: 'animate-bounce-in' },
-  { id: 'phoenix', name: 'Phoenix', icon: '🦅', cost: 4000, type: 'animated', animationClass: 'animate-pulse-fast' },
-  { id: 'volcano', name: 'Volcano', icon: '🌋', cost: 6000, type: 'animated', animationClass: 'animate-shake' },
-  { id: 'ufo', name: 'UFO', icon: '🛸', cost: 8000, type: 'animated', animationClass: 'animate-float-random' },
+  { id: 'dragon', name: 'Dragon', icon: '🐉', cost: 5000, type: 'animated', animationClass: 'animate-dragon-breath' },
+  { id: 'jet', name: 'Private Jet', icon: '✈️', cost: 10000, type: 'animated', animationClass: 'animate-fly-up' },
+  { id: 'castle', name: 'Magic Castle', icon: '🏰', cost: 20000, type: 'animated', animationClass: 'animate-pulse' },
+  { id: 'pegasus', name: 'Pegasus', icon: '🦄', cost: 50000, type: 'animated', animationClass: 'animate-float' },
+  { id: 'island', name: 'Private Island', icon: '🏝️', cost: 100000, type: 'animated', animationClass: 'animate-pulse-slow' },
+  { id: 'spaceship', name: 'Starship', icon: '🛸', cost: 250000, type: 'animated', animationClass: 'animate-float-random' },
+  { id: 'phoenix_god', name: 'Phoenix God', icon: '🦅', cost: 500000, type: 'animated', animationClass: 'animate-pulse-fast' },
+  { id: 'universe', name: 'Flex Universe', icon: '🌌', cost: 1000000, type: 'animated', animationClass: 'animate-spin-slow' },
 ];
 
 export const STORE_ITEMS: StoreItem[] = [

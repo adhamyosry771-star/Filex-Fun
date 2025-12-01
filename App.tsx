@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { Home, Trophy, User as UserIcon, Users, PlusCircle, Copy, MessageSquare, Loader2, ChevronRight, Crown, ShoppingBag, Wallet as WalletIcon, Settings, Gem, Coins, Edit3, Zap, X, Trash2, Shield, Info, Smartphone, Star, Gamepad2, BadgeCheck, Database } from 'lucide-react';
 import HomeView from './components/HomeView';
@@ -652,7 +653,7 @@ const App: React.FC = () => {
               <MessageSquare className="w-6 h-6" />
               <span className="text-[10px] mt-1 font-bold">{t('msgs')}</span>
               {totalUnread > 0 && (
-                  <div className="absolute top-1 right-3 w-4 h-4 bg-red-500 text-white text-[9px] font-bold rounded-full flex items-center justify-center animate-pulse">
+                  <div className="absolute top-1 right-3 min-w-[16px] h-[16px] bg-red-600 text-white text-[9px] font-bold rounded-full flex items-center justify-center border-2 border-gray-900 animate-pulse z-20 px-1">
                       {totalUnread > 99 ? '99+' : totalUnread}
                   </div>
               )}

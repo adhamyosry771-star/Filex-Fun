@@ -54,6 +54,7 @@ export interface User {
   visitorsCount?: number;
   isAdmin?: boolean;
   adminRole?: 'super_admin' | 'admin' | null;
+  bio?: string;
   isBanned?: boolean;
   banExpiresAt?: number; // Timestamp for when ban ends
   isPermanentBan?: boolean; // Flag for permanent ban
@@ -78,6 +79,7 @@ export interface ChatMessage {
   text: string;
   isSystem?: boolean;
   isGift?: boolean;
+  isJoin?: boolean; // New field for Join Event
   giftType?: 'static' | 'animated'; // New field to identify gift type
   giftIcon?: string; // To render the animation
   timestamp: number;

@@ -8,6 +8,7 @@ import { joinVoiceChannel, leaveVoiceChannel, toggleMicMute, publishMicrophone, 
 import { generateAiHostResponse } from '../services/geminiService';
 import UserProfileModal from './UserProfileModal';
 import RoomLeaderboard from './RoomLeaderboard';
+import FullProfileView from './FullProfileView';
 
 interface RoomViewProps {
   room: Room;
@@ -38,6 +39,8 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
   const [showLeaderboard, setShowLeaderboard] = useState(false);
   
   const [selectedUser, setSelectedUser] = useState<RoomSeat | null>(null);
+  const [fullProfileUser, setFullProfileUser] = useState<User | null>(null); // For Full Profile View
+
   const [seatToConfirm, setSeatToConfirm] = useState<number | null>(null);
   const [loadingSeatIndex, setLoadingSeatIndex] = useState<number | null>(null);
   const [floatingHearts, setFloatingHearts] = useState<{id: number, left: number}[]>([]);
@@ -66,24 +69,69 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
   const isRoomAdmin = room.admins?.includes(currentUser.uid!);
   const canManageRoom = isHost || isRoomAdmin;
 
-  const seats = room.seats || Array(11).fill(null).map((_, i) => ({ index: i, userId: null, giftCount: 0 }));
+  // --- SEAT LOGIC: Ensure 11 Seats (1 Host + 10 Guests) ---
+  const seats: RoomSeat[] = Array(11).fill(null).map((_, i) => {
+      // Return real seat if exists, otherwise return empty placeholder
+      return (room.seats && room.seats[i]) ? room.seats[i] : { 
+          index: i, 
+          userId: null, 
+          userName: null,
+          userAvatar: null,
+          isMuted: false, 
+          isLocked: false, 
+          giftCount: 0,
+          frameId: null,
+          adminRole: null
+      };
+  });
+
   const mySeat = seats.find(s => s.userId === currentUser.id);
   
+  // Track if seated for cleanup
+  const isSeatedRef = useRef(false);
+  useEffect(() => {
+      isSeatedRef.current = !!mySeat;
+  }, [mySeat]);
+
   // Calculate active speakers dynamically
   const activeSeats = seats.filter(s => s.userId);
+
+  // --- UNMOUNT CLEANUP ---
+  useEffect(() => {
+      // Setup Agora on Mount
+      const uid = currentUser.uid || currentUser.id;
+      if (uid) {
+          joinVoiceChannel(room.id, uid);
+      }
+
+      return () => {
+          // Cleanup handled by handleLeaveRoomAction mostly, but this is a fail-safe
+          leaveVoiceChannel().catch(() => {});
+      };
+  }, [room.id]); // Keep dependency stable
 
   // --- LISTEN TO ROOM UPDATES ---
   useEffect(() => {
       const unsubscribe = listenToRoom(initialRoom.id, (updatedRoom) => {
           if (updatedRoom) {
               setRoom(prevRoom => {
-                  const newSeats = updatedRoom.seats.map(serverSeat => {
+                  // Adjust seats array to match 11
+                  const existingSeats = updatedRoom.seats || [];
+                  const adjustedSeats = Array(11).fill(null).map((_, i) => existingSeats[i] || { 
+                      index: i, 
+                      userId: null, 
+                      giftCount: 0,
+                      isMuted: false, 
+                      isLocked: false 
+                  });
+
+                  const newSeats = adjustedSeats.map(serverSeat => {
                       if (pendingKickSeats.current.has(serverSeat.index)) {
                           if (!serverSeat.userId) {
                               pendingKickSeats.current.delete(serverSeat.index);
                               return serverSeat;
                           }
-                          return { ...serverSeat, userId: null, userName: null, userAvatar: null, giftCount: 0, adminRole: null, isMuted: false, frameId: undefined };
+                          return { ...serverSeat, userId: null, userName: null, userAvatar: null, giftCount: 0, adminRole: null, isMuted: false, frameId: null };
                       }
                       return serverSeat;
                   });
@@ -107,7 +155,7 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
               }
 
               if (updatedRoom.bannedUsers && updatedRoom.bannedUsers.includes(currentUser.uid!)) {
-                  alert(language === 'ar' ? 'تم طردك من الغرفة من قبل المضيف' : 'You have been kicked/banned by the host');
+                  // Banned logic
                   onAction('leave');
               }
 
@@ -116,45 +164,38 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
           }
       });
       return () => unsubscribe();
-  }, [initialRoom.id, onAction, showRoomSettings, currentUser.uid, language]);
+  }, [initialRoom.id, onAction, showRoomSettings, currentUser.uid]);
 
-  // --- AGORA AUDIO ---
-  useEffect(() => {
-      const uid = currentUserRef.current.uid || currentUserRef.current.id;
-      if (uid) {
-          joinVoiceChannel(room.id, uid);
-      }
-      return () => {
-          leaveVoiceChannel();
-      };
-  }, [room.id]); 
+  // Derived state for my seat status to prevent unnecessary re-runs
+  const mySeatIndex = mySeat?.index;
+  const mySeatMuted = mySeat?.isMuted;
+  const amISeated = !!mySeat;
 
+  // Optimized Effect: Logic to manage mic state without blocking UI
   useEffect(() => {
-      if (mySeat) {
-          publishMicrophone(mySeat.isMuted);
-          if (loadingSeatIndex === mySeat.index) setLoadingSeatIndex(null);
+      if (amISeated) {
+          // Fire and forget - don't await to prevent UI block
+          publishMicrophone(!!mySeatMuted).catch(err => {
+              console.warn("Mic publish info:", err);
+          });
+          if (loadingSeatIndex === mySeatIndex) setLoadingSeatIndex(null);
       } else {
           if (loadingSeatIndex === null) {
-              unpublishMicrophone();
+              unpublishMicrophone().catch(err => console.warn("Mic unpublish info:", err));
           }
       }
-  }, [seats, currentUser.id]);
+  }, [amISeated, mySeatMuted, loadingSeatIndex]);
 
   // --- AI HOST & ANIMATIONS ---
   useEffect(() => {
      if (!room || !room.id) return;
-     
-     // Reset timestamp when entering/switching rooms to hide old history
      joinTimestamp.current = Date.now();
 
      const unsubscribe = listenToMessages(room.id, (realTimeMsgs) => {
-         // Filter out messages older than when the user joined the room session
          const freshMessages = realTimeMsgs.filter(msg => msg.timestamp >= joinTimestamp.current);
          setMessages(freshMessages);
 
-         // Check for animated gifts in new messages (last one)
          const latestMsg = freshMessages[freshMessages.length - 1];
-         // Very basic check to avoid re-triggering animation on stale message load
          if (latestMsg && latestMsg.isGift && latestMsg.giftType === 'animated' && latestMsg.giftIcon && (Date.now() - latestMsg.timestamp < 5000)) {
              triggerAnimation(latestMsg.giftIcon, latestMsg.text.includes('Rocket') ? 'animate-fly-up' : 'animate-bounce-in');
          }
@@ -209,15 +250,6 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
           ar: 'مرحباً في Flex Fun! يرجى الالتزام بالاحترام المتبادل ممنوع السب، الشتم، او الكلام المسئ. نحن مجتمع راق للمتعه والتواصل.', 
           en: 'Welcome to Flex Fun! Please maintain mutual respect. No insults, cursing, or abusive language. We are a classy community for fun and connection.' 
       },
-      roomInfo: { ar: 'وصف الغرفة:', en: 'Room Info:' },
-      sendTo: { ar: 'إرسال إلى:', en: 'Send to:' },
-      everyone: { ar: 'الجميع', en: 'Everyone' },
-      me: { ar: 'نفسي', en: 'Myself' },
-      noFunds: { ar: 'لا يوجد رصيد كافٍ', en: 'Insufficient Balance' },
-      send: { ar: 'إرسال', en: 'Send' },
-      static: { ar: 'كلاسيك', en: 'Classic' },
-      animated: { ar: 'متحركة', en: 'Animated' },
-      selectGift: { ar: 'اختر هدية', en: 'Select Gift' },
       host: { ar: 'المضيف', en: 'Host' },
       exitTitle: { ar: 'مغادرة الغرفة', en: 'Exit Room' },
       minimize: { ar: 'تصغير (احتفاظ)', en: 'Minimize' },
@@ -228,13 +260,10 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
       lockedMsg: { ar: 'هذا المقعد مغلق من قبل المضيف', en: 'This seat is locked by the host' },
       lock: { ar: 'قفل', en: 'Lock' },
       unlock: { ar: 'فتح القفل', en: 'Unlock' },
-      loginReq: { ar: 'يرجى تسجيل الدخول أولاً', en: 'Please login first' },
       roomSettings: { ar: 'إعدادات الغرفة', en: 'Room Settings' },
       roomDesc: { ar: 'وصف الغرفة / القوانين', en: 'Room Rules / Description' },
       save: { ar: 'حفظ', en: 'Save' },
       roomTitle: { ar: 'اسم الغرفة', en: 'Room Title' },
-      roomBanned: { ar: 'تم حظر هذه الغرفة من قبل الإدارة', en: 'Room Banned by Admin' },
-      welcome: { ar: 'مرحباً بك في الغرفة!', en: 'Welcome to the room!' },
       activeUsers: { ar: 'المتصلين الآن', en: 'Online Users' },
       uploadBg: { ar: 'رفع صورة', en: 'Upload Image' },
       aiHost: { ar: 'المضيف الذكي', en: 'AI Host' },
@@ -254,7 +283,15 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
       removeAdmin: { ar: 'إزالة مشرف', en: 'Remove Admin' },
       adminList: { ar: 'قائمة المشرفين', en: 'Admin List' },
       remove: { ar: 'إزالة', en: 'Remove' },
-      onMic: { ar: 'على المايك', en: 'On Mic' }
+      onMic: { ar: 'على المايك', en: 'On Mic' },
+      send: { ar: 'إرسال', en: 'Send' },
+      sendTo: { ar: 'إرسال إلى:', en: 'Send to:' },
+      everyone: { ar: 'الجميع', en: 'Everyone' },
+      me: { ar: 'نفسي', en: 'Myself' },
+      noFunds: { ar: 'لا يوجد رصيد كافٍ', en: 'Insufficient Balance' },
+      static: { ar: 'كلاسيك', en: 'Classic' },
+      animated: { ar: 'متحركة', en: 'Animated' },
+      selectGift: { ar: 'اختر هدية', en: 'Select Gift' },
     };
     return dict[key]?.[language] || key;
   };
@@ -269,7 +306,7 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
       text: inputValue,
       timestamp: Date.now(),
       frameId: currentUser.equippedFrame || null, 
-      bubbleId: currentUser.equippedBubble || null, // Bubble ID
+      bubbleId: currentUser.equippedBubble || null,
       vipLevel: currentUser.vipLevel || 0,
       adminRole: currentUser.adminRole || null
     };
@@ -312,7 +349,7 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
     }
 
     try {
-        await sendGiftTransaction(room.id, currentUser.uid, targetSeatIndex, selectedGift.cost);
+        await sendGiftTransaction(room.id, currentUser.uid, targetSeatIndex, selectedGift.cost, selectedGift.id);
         
         const giftMsg: ChatMessage = {
           id: Date.now().toString(),
@@ -330,7 +367,6 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
           adminRole: currentUser.adminRole || null
         };
         
-        // Optimistic Animation for Sender
         if (selectedGift.type === 'animated') {
             triggerAnimation(selectedGift.icon, selectedGift.animationClass);
         } else {
@@ -376,8 +412,12 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
       const index = seatToConfirm;
       setSeatToConfirm(null); 
       setLoadingSeatIndex(index); 
-      publishMicrophone(false);
-      try { await takeSeat(room.id, index, currentUser); } catch (e) { setLoadingSeatIndex(null); unpublishMicrophone(); }
+      
+      try { 
+          await takeSeat(room.id, index, currentUser); 
+      } catch (e) { 
+          setLoadingSeatIndex(null); 
+      }
   };
 
   const handleToggleLock = async () => {
@@ -397,26 +437,28 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
       setShowRoomSettings(false);
   };
 
-  const handleLeaveRoomAction = async () => {
-      // Ensure seat leaving happens before component unmounts
-      if (mySeat) {
-          try {
-              await leaveSeat(room.id, currentUser);
-          } catch (e) {
-              console.error("Error leaving seat on exit:", e);
-          }
-      }
-      
-      try {
-          await decrementViewerCount(room.id);
-      } catch (e) {
-          console.error("Error decrementing viewer count:", e);
-      }
-
-      unpublishMicrophone().catch(console.warn);
-      leaveVoiceChannel().catch(console.warn);
-      
+  // --- OPTIMIZED EXIT FUNCTION ---
+  const handleLeaveRoomAction = () => {
+      // 1. Immediate UI Switch (Optimistic UI) - Zero delay for the user
       onAction('leave');
+
+      // 2. Perform heavy cleanup in background (Fire and forget)
+      const performCleanup = async () => {
+          try {
+              if (isSeatedRef.current && currentUserRef.current) {
+                  await leaveSeat(room.id, currentUserRef.current);
+              }
+              await decrementViewerCount(room.id);
+          } catch (e) {
+              console.error("Background cleanup error:", e);
+          }
+          // Agora cleanup is synchronous/fast in our optimized service
+          unpublishMicrophone();
+          leaveVoiceChannel();
+      };
+      
+      // Execute cleanup without awaiting it in the main flow
+      performCleanup();
   };
 
   const handleToggleMyMute = async () => {
@@ -433,10 +475,10 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
   const handleLeaveSeat = async () => {
       if (!mySeat) return;
       setRoom(prev => {
-          const newSeats = prev.seats.map(s => s.index === mySeat.index ? { ...s, userId: null, userName: null, userAvatar: null, giftCount: 0, adminRole: null, isMuted: false, frameId: undefined } : s);
+          const newSeats = prev.seats.map(s => s.index === mySeat.index ? { ...s, userId: null, userName: null, userAvatar: null, giftCount: 0, adminRole: null, isMuted: false, frameId: null } : s);
           return { ...prev, seats: newSeats };
       });
-      unpublishMicrophone();
+      unpublishMicrophone().catch(err => console.warn("Unpublish err", err));
       try {
           await leaveSeat(room.id, currentUser);
       } catch (e) {
@@ -467,7 +509,7 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
       pendingKickSeats.current.add(seatIndex);
       setRoom(prev => {
           const newSeats = [...prev.seats];
-          if (newSeats[seatIndex]) newSeats[seatIndex] = { ...newSeats[seatIndex], userId: null, userName: null, userAvatar: null, giftCount: 0, adminRole: null, isMuted: false, frameId: undefined };
+          if (newSeats[seatIndex]) newSeats[seatIndex] = { ...newSeats[seatIndex], userId: null, userName: null, userAvatar: null, giftCount: 0, adminRole: null, isMuted: false, frameId: null };
           return { ...prev, seats: newSeats };
       });
       kickUserFromSeat(room.id, seatIndex);
@@ -550,7 +592,7 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
 
       {/* 3. MIC GRID */}
       <div className="relative z-10 w-full px-2 pt-2 pb-2 flex-1 flex flex-col">
-          {/* Host */}
+          {/* Host (Index 0) */}
           <div className="flex justify-center mb-4">
              {seats.slice(0, 1).map((seat) => (
                  <div key={seat.index} className="flex flex-col items-center relative group">
@@ -564,7 +606,8 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
                  </div>
              ))}
           </div>
-          {/* Guests */}
+          
+          {/* Guests (Indices 1-10) - 2 Rows of 5 */}
           <div className="grid grid-cols-5 gap-y-4 gap-x-2 justify-items-center">
              {seats.slice(1).map((seat) => (
                  <div key={seat.index} className="flex flex-col items-center w-full relative">
@@ -730,7 +773,7 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
           </div>
       )}
 
-      {/* ... Other Modals (UserProfileModal, RoomLeaderboard, etc.) remain unchanged ... */}
+      {/* ... Other Modals (UserProfileModal, RoomLeaderboard, etc.) ... */}
       {selectedUser && (
           <UserProfileModal 
               user={selectedUser}
@@ -752,6 +795,18 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
               onBanUser={canManageRoom && selectedUser.userId && selectedUser.userId !== room.hostId ? () => handleBanUser(selectedUser.userId!) : undefined}
               onMakeAdmin={isHost && selectedUser.userId && selectedUser.userId !== room.hostId ? () => handleMakeAdmin(selectedUser.userId!) : undefined}
               onRemoveAdmin={isHost && selectedUser.userId && selectedUser.userId !== room.hostId ? () => handleRemoveAdmin(selectedUser.userId!) : undefined}
+              onOpenFullProfile={(user) => {
+                  setFullProfileUser(user);
+                  setSelectedUser(null);
+              }}
+          />
+      )}
+
+      {fullProfileUser && (
+          <FullProfileView 
+              user={fullProfileUser}
+              onClose={() => setFullProfileUser(null)}
+              language={language}
           />
       )}
 

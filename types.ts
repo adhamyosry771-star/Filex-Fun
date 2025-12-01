@@ -37,6 +37,7 @@ export interface User {
   level: number;
   diamondsSpent?: number;
   diamondsReceived?: number; // For Charm Level
+  receivedGifts?: Record<string, number>; // GiftID -> Count
   vip: boolean;
   vipLevel?: number;
   country?: string;
@@ -80,8 +81,8 @@ export interface ChatMessage {
   giftType?: 'static' | 'animated'; // New field to identify gift type
   giftIcon?: string; // To render the animation
   timestamp: number;
-  frameId?: string;
-  bubbleId?: string;
+  frameId?: string | null;
+  bubbleId?: string | null;
   vipLevel?: number;
   adminRole?: 'super_admin' | 'admin' | null;
 }
@@ -111,7 +112,7 @@ export interface RoomSeat {
   userId: string | null;
   userName: string | null;
   userAvatar: string | null;
-  frameId?: string; // Frame visible on seat
+  frameId?: string | null; // Frame visible on seat, allowed to be null
   isMuted: boolean;
   isLocked: boolean;
   giftCount: number;

@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { Shield, Trash2, Ban, Search, Gift, Crown, ArrowLeft, RefreshCw, CheckCircle, Megaphone, Edit3, Send, Home, XCircle, Flame, Image as ImageIcon, Plus, X, Database, Clock, Gamepad2 } from 'lucide-react';
-import { getAllUsers, adminUpdateUser, deleteAllRooms, sendSystemNotification, broadcastOfficialMessage, searchUserByDisplayId, getRoomByHostId, adminBanRoom, deleteRoom, toggleRoomHotStatus, toggleRoomActivitiesStatus, addBanner, deleteBanner, listenToBanners } from '../services/firebaseService';
+import { getAllUsers, adminUpdateUser, deleteAllRooms, sendSystemNotification, broadcastOfficialMessage, searchUserByDisplayId, getRoomByHostId, adminBanRoom, deleteRoom, toggleRoomHotStatus, toggleRoomActivitiesStatus, addBanner, deleteBanner, listenToBanners, syncRoomIdsWithUserIds } from '../services/firebaseService';
 import { Language, User, Room, Banner } from '../types';
 import { VIP_TIERS, ADMIN_ROLES } from '../constants';
 
@@ -364,6 +364,18 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, language }) => 
       setActionLoading(null);
   };
 
+  const handleSyncRoomIds = async () => {
+      if (!confirm("⚠️ هذا الإجراء سيقوم بتغيير ID جميع الرومات الموجودة لتطابق ID أصحابها. هل أنت متأكد؟")) return;
+      setActionLoading('sync_ids');
+      try {
+          await syncRoomIdsWithUserIds();
+          alert("تم توحيد المعرفات بنجاح!");
+      } catch (e) {
+          alert("حدث خطأ أثناء التحديث");
+      }
+      setActionLoading(null);
+  };
+
   const handleAddBanner = async () => {
       if (!newBannerImage) return;
       setActionLoading('add_banner');
@@ -373,7 +385,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, language }) => 
           setNewBannerTitle('');
           alert("تم إضافة البنر");
       } catch (e) {
-          alert("فشل إضافة البنر");
+          alert("فشل إضافة البنر. قد يكون حجم الصورة كبيراً جداً.");
       }
       setActionLoading(null);
   };
@@ -387,21 +399,50 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, language }) => 
       }
   };
 
+  // Improved Image Uploader with Compression to fix Firestore 1MB limit issue
   const handleBannerUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
-      if (file) {
-          if (file.size > 1024 * 1024) { // 1MB limit for base64 safety
-              alert("حجم الصورة كبير جداً، يفضل أقل من 1MB");
-              return;
-          }
-          const reader = new FileReader();
-          reader.onloadend = () => {
-              if (typeof reader.result === 'string') {
-                  setNewBannerImage(reader.result);
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = (event) => {
+          const img = new Image();
+          img.onload = () => {
+              // Create Canvas for Compression
+              const canvas = document.createElement('canvas');
+              let width = img.width;
+              let height = img.height;
+
+              // Max Width Constraint
+              const MAX_WIDTH = 800;
+              if (width > MAX_WIDTH) {
+                  height = (height * MAX_WIDTH) / width;
+                  width = MAX_WIDTH;
+              }
+
+              canvas.width = width;
+              canvas.height = height;
+              const ctx = canvas.getContext('2d');
+              
+              if (ctx) {
+                  ctx.drawImage(img, 0, 0, width, height);
+                  // Compress to JPEG with 0.6 quality
+                  const dataUrl = canvas.toDataURL('image/jpeg', 0.6);
+                  
+                  // Check final size
+                  if (dataUrl.length > 1000000) { // Approx 1MB limit for safety
+                      alert("الصورة لا تزال كبيرة جداً، يرجى اختيار صورة أخرى.");
+                      return;
+                  }
+                  
+                  setNewBannerImage(dataUrl);
               }
           };
-          reader.readAsDataURL(file);
-      }
+          if (typeof event.target?.result === 'string') {
+              img.src = event.target.result;
+          }
+      };
+      reader.readAsDataURL(file);
   };
 
   // Filter Agents
@@ -658,7 +699,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, language }) => 
                   <div className="flex flex-col gap-2">
                       <label className="bg-black border border-gray-700 p-3 rounded-lg text-gray-400 flex items-center justify-center cursor-pointer hover:border-purple-500">
                           <input type="file" className="hidden" accept="image/*" onChange={handleBannerUpload} />
-                          <div className="flex items-center gap-2"><ImageIcon className="w-5 h-5"/> {newBannerImage ? 'تم اختيار الصورة' : 'رفع صورة (Max 1MB)'}</div>
+                          <div className="flex items-center gap-2"><ImageIcon className="w-5 h-5"/> {newBannerImage ? 'تم اختيار الصورة' : 'رفع صورة (تلقائي الضغط)'}</div>
                       </label>
                       {newBannerImage && (
                           <div className="h-20 w-full bg-black rounded-lg overflow-hidden relative">
@@ -725,12 +766,21 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, language }) => 
       )}
 
       {activeTab === 'system' && (
-          <div className="flex-1 p-8 flex flex-col items-center justify-center">
+          <div className="flex-1 p-8 flex flex-col items-center justify-center space-y-4">
               <div className="bg-red-900/10 p-6 rounded-2xl border border-red-900/50 max-w-sm w-full text-center">
                   <Trash2 className="w-16 h-16 text-red-500 mx-auto mb-4" />
                   <h2 className="text-xl font-bold text-red-500 mb-2">منطقة الخطر</h2>
                   <button onClick={() => handleDeleteRooms()} disabled={actionLoading === 'system'} className="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-3 rounded-lg mt-4">
                       {actionLoading === 'system' ? 'جاري الحذف...' : 'حذف جميع الرومات'}
+                  </button>
+              </div>
+
+              <div className="bg-gray-800/50 p-6 rounded-2xl border border-gray-700 max-w-sm w-full text-center">
+                  <RefreshCw className="w-12 h-12 text-blue-500 mx-auto mb-4" />
+                  <h2 className="text-lg font-bold text-blue-400 mb-2">إصلاح معرفات الغرف</h2>
+                  <p className="text-xs text-gray-400 mb-4">تحديث جميع الغرف القديمة لتستخدم معرف المستخدم كمعرف للغرفة.</p>
+                  <button onClick={handleSyncRoomIds} disabled={actionLoading === 'sync_ids'} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-lg">
+                      {actionLoading === 'sync_ids' ? 'جاري التحديث...' : 'توحيد معرفات الرومات'}
                   </button>
               </div>
           </div>

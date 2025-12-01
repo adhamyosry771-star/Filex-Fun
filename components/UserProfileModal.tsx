@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { X, User as UserIcon, MessageSquare, Gift, BadgeCheck, Loader2, Shield, MicOff, Ban, UserCog, UserMinus } from 'lucide-react';
+import { X, User as UserIcon, MessageSquare, Gift, BadgeCheck, Loader2, Shield, MicOff, Ban, UserCog, UserMinus, Maximize2 } from 'lucide-react';
 import { User, Language, RoomSeat } from '../types';
 import { searchUserByDisplayId, getUserProfile } from '../services/firebaseService';
 import { LEVEL_ICONS, CHARM_ICONS, ADMIN_ROLES } from '../constants';
@@ -15,10 +15,11 @@ interface UserProfileModalProps {
   onBanUser?: () => void;
   onMakeAdmin?: () => void;
   onRemoveAdmin?: () => void;
+  onOpenFullProfile: (user: User) => void;
   language: Language;
 }
 
-const UserProfileModal: React.FC<UserProfileModalProps> = ({ user, currentUser, onClose, onMessage, onGift, onKickSeat, onBanUser, onMakeAdmin, onRemoveAdmin, language }) => {
+const UserProfileModal: React.FC<UserProfileModalProps> = ({ user, currentUser, onClose, onMessage, onGift, onKickSeat, onBanUser, onMakeAdmin, onRemoveAdmin, onOpenFullProfile, language }) => {
   const [fullProfile, setFullProfile] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
@@ -93,6 +94,24 @@ const UserProfileModal: React.FC<UserProfileModalProps> = ({ user, currentUser, 
     return dict[key][language];
   };
 
+  const handleAvatarClick = () => {
+      if (fullProfile) {
+          onOpenFullProfile(fullProfile);
+      } else {
+          // If profile not fully loaded yet, construct a temporary one
+          // This ensures the view opens even if data is partial
+          const tempUser: any = {
+              ...user,
+              id: displayId,
+              name: displayName,
+              avatar: displayAvatar,
+              // Fallback fields
+              receivedGifts: {} 
+          };
+          onOpenFullProfile(tempUser as User);
+      }
+  };
+
   return (
     <div className="absolute inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in zoom-in-95">
       <div className="w-full max-w-sm bg-gray-900 border border-gray-700 rounded-3xl overflow-hidden shadow-2xl relative">
@@ -107,8 +126,14 @@ const UserProfileModal: React.FC<UserProfileModalProps> = ({ user, currentUser, 
 
         {/* Avatar & Info */}
         <div className="px-6 pb-6 -mt-12 flex flex-col items-center">
-            <div className="w-24 h-24 rounded-full p-1 bg-gray-900 relative">
-                <img src={displayAvatar || ''} className="w-full h-full rounded-full object-cover border-4 border-gray-900" />
+            <div 
+                className="w-24 h-24 rounded-full p-1 bg-gray-900 relative cursor-pointer group"
+                onClick={handleAvatarClick}
+            >
+                <img src={displayAvatar || ''} className="w-full h-full rounded-full object-cover border-4 border-gray-900 transition group-hover:opacity-80" />
+                <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition duration-300">
+                    <Maximize2 className="w-8 h-8 text-white drop-shadow-md" />
+                </div>
                 {isOfficial && (
                      <div className="absolute bottom-0 right-0 bg-white rounded-full p-1 shadow-md">
                         <BadgeCheck className="w-5 h-5 text-blue-500 fill-blue-100" />

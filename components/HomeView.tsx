@@ -190,19 +190,19 @@ const HomeView: React.FC<HomeViewProps> = ({ rooms, onJoinRoom, language, userPr
         
         {/* --- DYNAMIC BANNER CAROUSEL --- */}
         {!searchQuery && (
-            <div className="w-full h-40 rounded-2xl bg-gray-800 relative overflow-hidden shadow-lg group">
+            <div className="w-full h-40 rounded-2xl bg-gray-800 relative overflow-hidden shadow-lg group" dir="ltr">
                 {banners.length > 0 ? (
                     <>
                         <div 
                             className="flex h-full transition-transform duration-700 ease-in-out" 
-                            style={{ transform: `translateX(${language === 'ar' ? '' : '-'}${currentSlide * 100}%)`, flexDirection: language === 'ar' ? 'row-reverse' : 'row' }}
+                            style={{ transform: `translateX(-${currentSlide * 100}%)` }}
                         >
                             {banners.map((banner) => (
                                 <div key={banner.id} className="min-w-full h-full relative">
                                     <img src={banner.imageUrl} className="w-full h-full object-cover" />
                                     <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent"></div>
                                     {banner.title && (
-                                        <div className={`absolute bottom-4 ${language === 'ar' ? 'right-4' : 'left-4'} z-10`}>
+                                        <div className={`absolute bottom-4 ${language === 'ar' ? 'right-4 text-right' : 'left-4 text-left'} z-10 w-full px-4`}>
                                             <h2 className="text-lg font-bold text-white drop-shadow-md">{banner.title}</h2>
                                         </div>
                                     )}
@@ -224,7 +224,7 @@ const HomeView: React.FC<HomeViewProps> = ({ rooms, onJoinRoom, language, userPr
                     </>
                 ) : (
                     /* Default Static Banner if no dynamic banners */
-                    <div className="w-full h-full relative bg-gradient-to-r from-purple-800 to-indigo-900 cursor-pointer">
+                    <div className="w-full h-full relative bg-gradient-to-r from-purple-800 to-indigo-900 cursor-pointer" dir={language === 'ar' ? 'rtl' : 'ltr'}>
                         <div className="absolute inset-0 bg-[url('https://images.unsplash.com/photo-1492684223066-81342ee5ff30?q=80&w=800&auto=format&fit=crop')] bg-cover opacity-40 group-hover:scale-105 transition duration-700"></div>
                         <div className={`absolute bottom-4 ${language === 'ar' ? 'right-4' : 'left-4'}`}>
                             <span className="bg-accent-500 text-xs font-bold px-2 py-1 rounded mb-2 inline-block">

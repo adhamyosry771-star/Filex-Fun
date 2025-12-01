@@ -17,7 +17,8 @@ import {
   arrayUnion, 
   arrayRemove,
   Unsubscribe,
-  writeBatch
+  writeBatch,
+  runTransaction
 } from 'firebase/firestore';
 import { 
   signInWithPopup, 
@@ -36,8 +37,24 @@ import {
   FriendRequest, 
   PrivateMessage, 
   PrivateChatSummary,
-  StoreItem
+  StoreItem,
+  RoomSeat
 } from '../types';
+
+// --- Helper to Sanitize Data for Firestore ---
+// Firestore throws "Unsupported field value: undefined" if we try to save undefined.
+// We must convert undefined to null.
+const sanitizeSeat = (seat: any): RoomSeat => ({
+    index: seat.index,
+    userId: seat.userId ?? null,
+    userName: seat.userName ?? null,
+    userAvatar: seat.userAvatar ?? null,
+    frameId: seat.frameId ?? null,
+    isMuted: !!seat.isMuted,
+    isLocked: !!seat.isLocked,
+    giftCount: seat.giftCount || 0,
+    adminRole: seat.adminRole ?? null,
+});
 
 // --- Auth ---
 export const loginWithGoogle = async () => {
@@ -76,6 +93,7 @@ export const createUserProfile = async (uid: string, data: Partial<User>) => {
     level: 1,
     diamondsSpent: 0,
     diamondsReceived: 0,
+    receivedGifts: {},
     vip: false,
     vipLevel: 0,
     wallet: { diamonds: 0, coins: 0 },
@@ -139,6 +157,19 @@ export const deleteAllRooms = async () => {
   await batch.commit();
 };
 
+export const syncRoomIdsWithUserIds = async () => {
+  const roomsSnap = await getDocs(collection(db, 'rooms'));
+  const batch = writeBatch(db);
+  roomsSnap.docs.forEach(doc => {
+      const roomData = doc.data() as Room;
+      // Sync displayId to equal hostId (User's ID)
+      if (roomData.hostId && roomData.displayId !== roomData.hostId) {
+          batch.update(doc.ref, { displayId: roomData.hostId });
+      }
+  });
+  await batch.commit();
+};
+
 export const toggleRoomHotStatus = async (roomId: string, isHot: boolean) => {
   await updateDoc(doc(db, 'rooms', roomId), { isHot });
 };
@@ -173,7 +204,7 @@ export const createRoom = async (title: string, thumbnail: string, host: User, h
     const roomRef = doc(collection(db, 'rooms'));
     const newRoom: Room = {
         id: roomRef.id,
-        displayId: (100000 + Math.floor(Math.random() * 900000)).toString(),
+        displayId: host.id, // Use User ID as Room ID
         title,
         hostName: host.name,
         hostAvatar: host.avatar,
@@ -182,14 +213,17 @@ export const createRoom = async (title: string, thumbnail: string, host: User, h
         thumbnail,
         tags: [],
         isAiHost: false,
-        seats: Array(10).fill(null).map((_, i) => ({ 
+        // CHANGED: Initialize 11 seats (1 Host + 10 Guests)
+        seats: Array(11).fill(null).map((_, i) => ({ 
             index: i, 
             userId: null, 
             userName: null, 
             userAvatar: null, 
             isMuted: false, 
             isLocked: false, 
-            giftCount: 0 
+            giftCount: 0,
+            frameId: null,
+            adminRole: null
         })),
         isBanned: false,
         isHot: false,
@@ -239,57 +273,171 @@ export const decrementViewerCount = async (roomId: string) => {
     await updateDoc(doc(db, 'rooms', roomId), { viewerCount: increment(-1) });
 };
 
-// --- Seats & Moderation ---
+// --- Seats & Moderation (TRANSACTIONAL) ---
 export const takeSeat = async (roomId: string, seatIndex: number, user: User) => {
     const roomRef = doc(db, 'rooms', roomId);
-    const roomSnap = await getDoc(roomRef);
-    if (!roomSnap.exists()) return;
-    
-    const room = roomSnap.data() as Room;
-    const seats = [...room.seats];
-    
-    // Check if seat is taken or locked
-    if (seats[seatIndex].userId || seats[seatIndex].isLocked) return;
+    await runTransaction(db, async (transaction) => {
+        const roomDoc = await transaction.get(roomRef);
+        if (!roomDoc.exists()) throw "Room does not exist";
+        
+        const roomData = roomDoc.data() as Room;
+        let seats = [...roomData.seats];
+        
+        // 1. Check if target seat is taken by someone else
+        if (seats[seatIndex] && seats[seatIndex].userId && seats[seatIndex].userId !== user.id) {
+             throw "Seat occupied";
+        }
+        
+        // 2. Check if locked
+        if (seats[seatIndex] && seats[seatIndex].isLocked && !user.isAdmin && user.id !== roomData.hostId) {
+             throw "Seat locked";
+        }
+        
+        // 3. Check if user is already seated (Moving Logic)
+        const currentSeatIndex = seats.findIndex(s => s.userId === user.id);
+        if (currentSeatIndex !== -1) {
+            // User is moving from currentSeatIndex to seatIndex
+            // Clear old seat
+            seats[currentSeatIndex] = {
+                index: currentSeatIndex,
+                userId: null,
+                userName: null,
+                userAvatar: null,
+                frameId: null,
+                isMuted: false,
+                isLocked: seats[currentSeatIndex].isLocked, // Keep locked state
+                giftCount: 0,
+                adminRole: null
+            };
+        }
 
-    // Check if user is already in a seat
-    const existingSeat = seats.findIndex(s => s.userId === user.id);
-    if (existingSeat !== -1) return;
+        // 4. Occupy new seat
+        if (!seats[seatIndex]) {
+            // Should exist due to frontend padding, but safeguard for DB consistency
+            // If the DB only has 10 seats and we try to take index 10, expand the array
+            seats[seatIndex] = {
+                index: seatIndex,
+                userId: null,
+                userName: null,
+                userAvatar: null,
+                isMuted: false,
+                isLocked: false,
+                giftCount: 0,
+                frameId: null,
+                adminRole: null
+            };
+        }
 
-    seats[seatIndex] = {
-        ...seats[seatIndex],
-        userId: user.id,
-        userName: user.name,
-        userAvatar: user.avatar,
-        frameId: user.equippedFrame || undefined, // Store frame on seat
-        isMuted: false,
-        giftCount: 0
-    };
-    
-    await updateDoc(roomRef, { seats });
+        seats[seatIndex] = {
+            index: seatIndex,
+            userId: user.id,
+            userName: user.name,
+            userAvatar: user.avatar,
+            frameId: user.equippedFrame ?? null,
+            isMuted: false,
+            isLocked: seats[seatIndex].isLocked, // Preserve lock status
+            giftCount: 0, // Reset session gifts on new seat
+            adminRole: user.adminRole ?? null
+        };
+        
+        // SANITIZE ALL SEATS TO PREVENT UNDEFINED ERRORS
+        seats = seats.map(sanitizeSeat);
+        
+        transaction.update(roomRef, { seats });
+    });
 };
 
 export const leaveSeat = async (roomId: string, user: User) => {
     const roomRef = doc(db, 'rooms', roomId);
-    const roomSnap = await getDoc(roomRef);
-    if (!roomSnap.exists()) return;
-    
-    const room = roomSnap.data() as Room;
-    const seats = room.seats.map(s => s.userId === user.id ? { ...s, userId: null, userName: null, userAvatar: null, frameId: undefined, giftCount: 0, isMuted: false } : s);
-    
-    await updateDoc(roomRef, { seats });
+    await runTransaction(db, async (transaction) => {
+        const roomDoc = await transaction.get(roomRef);
+        if (!roomDoc.exists()) return; // Room might be deleted
+        
+        const roomData = roomDoc.data() as Room;
+        // Check if user is actually on a seat
+        const seats = roomData.seats.map(s => {
+            if (s.userId === user.id) {
+                return sanitizeSeat({ 
+                    index: s.index,
+                    userId: null, 
+                    userName: null, 
+                    userAvatar: null, 
+                    frameId: null,
+                    giftCount: 0, 
+                    isMuted: false,
+                    isLocked: s.isLocked, // Keep lock state
+                    adminRole: null
+                });
+            }
+            return sanitizeSeat(s);
+        });
+        
+        transaction.update(roomRef, { seats });
+    });
 };
 
 export const kickUserFromSeat = async (roomId: string, seatIndex: number) => {
     const roomRef = doc(db, 'rooms', roomId);
-    const roomSnap = await getDoc(roomRef);
-    if (!roomSnap.exists()) return;
-    
-    const room = roomSnap.data() as Room;
-    const seats = [...room.seats];
-    if (seats[seatIndex]) {
-        seats[seatIndex] = { ...seats[seatIndex], userId: null, userName: null, userAvatar: null, frameId: undefined, giftCount: 0, isMuted: false };
-        await updateDoc(roomRef, { seats });
-    }
+    await runTransaction(db, async (transaction) => {
+        const roomDoc = await transaction.get(roomRef);
+        if (!roomDoc.exists()) return;
+        
+        const roomData = roomDoc.data() as Room;
+        let seats = [...roomData.seats];
+        
+        if (seats[seatIndex]) {
+            seats[seatIndex] = { 
+                index: seats[seatIndex].index,
+                userId: null, 
+                userName: null, 
+                userAvatar: null, 
+                frameId: null,
+                giftCount: 0, 
+                isMuted: false,
+                isLocked: seats[seatIndex].isLocked,
+                adminRole: null
+            };
+            // Sanitize all
+            seats = seats.map(sanitizeSeat);
+            transaction.update(roomRef, { seats });
+        }
+    });
+};
+
+export const toggleSeatLock = async (roomId: string, seatIndex: number, isLocked: boolean) => {
+    const roomRef = doc(db, 'rooms', roomId);
+    await runTransaction(db, async (transaction) => {
+        const roomDoc = await transaction.get(roomRef);
+        if (!roomDoc.exists()) return;
+        
+        const roomData = roomDoc.data() as Room;
+        let seats = [...roomData.seats];
+        
+        if (seats[seatIndex]) {
+            seats[seatIndex].isLocked = isLocked;
+            // Sanitize all
+            seats = seats.map(sanitizeSeat);
+            transaction.update(roomRef, { seats });
+        }
+    });
+};
+
+export const toggleSeatMute = async (roomId: string, seatIndex: number, isMuted: boolean) => {
+    const roomRef = doc(db, 'rooms', roomId);
+    await runTransaction(db, async (transaction) => {
+        const roomDoc = await transaction.get(roomRef);
+        if (!roomDoc.exists()) return;
+        
+        const roomData = roomDoc.data() as Room;
+        let seats = [...roomData.seats];
+        
+        if (seats[seatIndex]) {
+            seats[seatIndex].isMuted = isMuted;
+             // Sanitize all
+            seats = seats.map(sanitizeSeat);
+            transaction.update(roomRef, { seats });
+        }
+    });
 };
 
 export const banUserFromRoom = async (roomId: string, userId: string) => {
@@ -316,33 +464,15 @@ export const removeRoomAdmin = async (roomId: string, userId: string) => {
     });
 };
 
-export const toggleSeatLock = async (roomId: string, seatIndex: number, isLocked: boolean) => {
-    const roomRef = doc(db, 'rooms', roomId);
-    const roomSnap = await getDoc(roomRef);
-    if (roomSnap.exists()) {
-        const seats = [...roomSnap.data().seats];
-        if (seats[seatIndex]) {
-            seats[seatIndex].isLocked = isLocked;
-            await updateDoc(roomRef, { seats });
-        }
-    }
-};
-
-export const toggleSeatMute = async (roomId: string, seatIndex: number, isMuted: boolean) => {
-    const roomRef = doc(db, 'rooms', roomId);
-    const roomSnap = await getDoc(roomRef);
-    if (roomSnap.exists()) {
-        const seats = [...roomSnap.data().seats];
-        if (seats[seatIndex]) {
-            seats[seatIndex].isMuted = isMuted;
-            await updateDoc(roomRef, { seats });
-        }
-    }
-};
-
 // --- Messaging ---
 export const sendMessage = async (roomId: string, message: ChatMessage) => {
-    await addDoc(collection(db, `rooms/${roomId}/messages`), message);
+    // Sanitize undefined fields for Firestore
+    const cleanMessage = { ...message };
+    if (cleanMessage.frameId === undefined) cleanMessage.frameId = null;
+    if (cleanMessage.bubbleId === undefined) cleanMessage.bubbleId = null;
+    if (cleanMessage.adminRole === undefined) cleanMessage.adminRole = null;
+
+    await addDoc(collection(db, `rooms/${roomId}/messages`), cleanMessage);
 };
 
 export const listenToMessages = (roomId: string, callback: (msgs: ChatMessage[]) => void): Unsubscribe => {
@@ -561,8 +691,8 @@ export const sendPrivateMessage = async (
         text,
         timestamp: Date.now(),
         read: false,
-        frameId: sender.frameId, // Persist current frame
-        bubbleId: sender.bubbleId // Persist current bubble
+        frameId: sender.frameId || undefined, 
+        bubbleId: sender.bubbleId || undefined 
     };
 
     const batch = writeBatch(db);
@@ -601,7 +731,7 @@ export const markChatAsRead = async (myUid: string, otherUid: string) => {
 };
 
 // --- Gifts ---
-export const sendGiftTransaction = async (roomId: string, senderUid: string, targetSeatIndex: number, cost: number) => {
+export const sendGiftTransaction = async (roomId: string, senderUid: string, targetSeatIndex: number, cost: number, giftId?: string) => {
     const batch = writeBatch(db);
     
     // Deduct from sender
@@ -616,12 +746,34 @@ export const sendGiftTransaction = async (roomId: string, senderUid: string, tar
     
     if (roomSnap.exists()) {
         const room = roomSnap.data() as Room;
-        const newSeats = [...room.seats];
+        let newSeats = [...room.seats];
+        
+        // Ensure newSeats has enough capacity if index >= existing length (for newly expanded rooms)
+        if (targetSeatIndex >= newSeats.length) {
+             const diff = targetSeatIndex - newSeats.length + 1;
+             for (let i=0; i<diff; i++) {
+                 newSeats.push({
+                    index: newSeats.length,
+                    userId: null,
+                    userName: null,
+                    userAvatar: null,
+                    isMuted: false,
+                    isLocked: false,
+                    giftCount: 0,
+                    frameId: null,
+                    adminRole: null
+                 });
+             }
+        }
+
         newSeats[targetSeatIndex].giftCount += cost;
+        
+        // SANITIZE before update
+        newSeats = newSeats.map(sanitizeSeat);
+        
         batch.update(roomRef, { seats: newSeats });
 
-        // --- Recipient Coin Logic ---
-        // 30% of the diamond cost goes to the recipient's wallet as Coins
+        // --- Recipient Coin & Gift Tracking Logic ---
         const recipientUserId = newSeats[targetSeatIndex].userId;
         if (recipientUserId) {
             // Find user doc by custom ID (seats store custom ID, not UID mostly)
@@ -632,10 +784,17 @@ export const sendGiftTransaction = async (roomId: string, senderUid: string, tar
                 const recipientDoc = userSnap.docs[0];
                 const coinsAmount = Math.floor(cost * 0.30); // 30%
                 
-                batch.update(recipientDoc.ref, {
+                const updates: any = {
                     'wallet.coins': increment(coinsAmount),
-                    diamondsReceived: increment(cost) // Also track received value for charm level
-                });
+                    diamondsReceived: increment(cost)
+                };
+
+                // Track specific gift count if ID is provided
+                if (giftId) {
+                    updates[`receivedGifts.${giftId}`] = increment(1);
+                }
+                
+                batch.update(recipientDoc.ref, updates);
             }
         }
     }

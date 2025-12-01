@@ -14,6 +14,9 @@ let currentChannel = '';
 // Queue to prevent race conditions only for critical Join/Leave ops
 let connectionQueue: Promise<void> = Promise.resolve();
 
+// Mic Switch Lock
+let isMicSwitching = false;
+
 // Helper Logger
 const log = (msg: string, err?: any) => {
     // Uncomment for debugging
@@ -59,6 +62,13 @@ export const joinVoiceChannel = (channelName: string, uid: string | number) => {
             if (client.connectionState === 'CONNECTED' && currentChannel === channelName) {
                 return;
             }
+            
+            // If we are connecting/disconnecting, wait
+            if (client.connectionState === 'CONNECTING' || client.connectionState === 'DISCONNECTING') {
+                 // Just return, let the current op finish. 
+                 // Or ideally wait, but here we just skip to avoid errors.
+                 return;
+            }
 
             // Leave previous channel if connected to a different one
             if (client.connectionState === 'CONNECTED') {
@@ -72,9 +82,12 @@ export const joinVoiceChannel = (channelName: string, uid: string | number) => {
 
         } catch (error: any) {
             log('Join Error', error);
-            // If websocket error, force reset
-            if (error?.code === 'WS_ABORT' || (error?.message && error.message.includes('websocket'))) {
-                 await leaveVoiceChannel();
+            // If websocket error or invalid state, attempt a full reset/leave
+            if (error?.code === 'WS_ABORT' || 
+                (error?.message && (error.message.includes('websocket') || error.message.includes('Invalid state')))) {
+                 try {
+                     if (client) await client.leave();
+                 } catch(e) { /* ignore leave error on reset */ }
             }
         }
     });
@@ -83,20 +96,36 @@ export const joinVoiceChannel = (channelName: string, uid: string | number) => {
 
 // 2. Switch Mic State (LIGHTNING FAST - BYPASS QUEUE)
 export const switchMicrophoneState = async (shouldPublish: boolean, muted: boolean = false) => {
-    if (!client) return;
-
+    if (!client || isMicSwitching) return;
+    
+    isMicSwitching = true;
     try {
         if (shouldPublish) {
             // --- START TALKING ---
             
             // 1. Prepare Track (Parallel to DB updates)
             if (!localAudioTrack) {
-                // Create mic track with optimized settings for voice
-                localAudioTrack = await AgoraRTC.createMicrophoneAudioTrack({
-                    encoderConfig: "music_standard", 
-                    AEC: true, // Echo cancellation
-                    ANS: true  // Noise suppression
-                });
+                try {
+                    // Create mic track with optimized settings for voice
+                    localAudioTrack = await AgoraRTC.createMicrophoneAudioTrack({
+                        encoderConfig: "music_standard", 
+                        AEC: true, // Echo cancellation
+                        ANS: true  // Noise suppression
+                    });
+                } catch (micError: any) {
+                    // Gracefully handle permission denied to prevent app crash/lag loops
+                    if (micError.name === "NotAllowedError" || micError.code === "PERMISSION_DENIED") {
+                        console.warn("Microphone permission denied by user.");
+                        isMicSwitching = false;
+                        return;
+                    }
+                    throw micError;
+                }
+            }
+
+            if (!localAudioTrack) {
+                isMicSwitching = false;
+                return; 
             }
 
             // 2. Local Mute (Instant feedback)
@@ -114,6 +143,7 @@ export const switchMicrophoneState = async (shouldPublish: boolean, muted: boole
             }
         } else {
             // --- STOP TALKING ---
+            // If stopping, we can just unpublish or close.
             
             if (localAudioTrack) {
                 // Unpublish immediately
@@ -130,6 +160,8 @@ export const switchMicrophoneState = async (shouldPublish: boolean, muted: boole
         }
     } catch (e) {
         log("Mic Switch Error", e);
+    } finally {
+        isMicSwitching = false;
     }
 };
 

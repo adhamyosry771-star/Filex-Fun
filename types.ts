@@ -53,6 +53,8 @@ export interface User {
   isAdmin?: boolean;
   adminRole?: 'super_admin' | 'admin' | null;
   isBanned?: boolean;
+  banExpiresAt?: number; // Timestamp for when ban ends
+  isPermanentBan?: boolean; // Flag for permanent ban
   isAgent?: boolean;
   agencyBalance?: number;
 }
@@ -74,6 +76,8 @@ export interface ChatMessage {
   text: string;
   isSystem?: boolean;
   isGift?: boolean;
+  giftType?: 'static' | 'animated'; // New field to identify gift type
+  giftIcon?: string; // To render the animation
   timestamp: number;
   frameId?: string;
   bubbleId?: string;
@@ -126,7 +130,8 @@ export interface Room {
   hostAvatar: string;
   hostId: string;
   viewerCount: number;
-  thumbnail: string;
+  thumbnail: string; // Outer Cover
+  backgroundImage?: string; // Inner Background
   tags: string[];
   isAiHost: boolean;
   seats: RoomSeat[]; 
@@ -134,6 +139,8 @@ export interface Room {
   isHot?: boolean;
   isOfficial?: boolean;
   contributors?: Record<string, Contributor>;
+  bannedUsers?: string[]; // Array of User IDs (UIDs) banned from this room
+  admins?: string[]; // Array of User IDs (UIDs) who are room admins
 }
 
 export interface Banner {
@@ -149,6 +156,8 @@ export interface Gift {
   name: string;
   icon: string;
   cost: number;
+  type: 'static' | 'animated';
+  animationClass?: string; // CSS class for animation
 }
 
 export interface StoreItem {

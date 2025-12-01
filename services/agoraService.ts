@@ -2,220 +2,170 @@
 import AgoraRTC, { IAgoraRTCClient, IMicrophoneAudioTrack } from 'agora-rtc-sdk-ng';
 
 // ---------------------------------------------------------------------------
-// ⚠️ AGORA CONFIGURATION
+// ⚠️ AGORA CONFIGURATION - LIGHTNING MODE
 // ---------------------------------------------------------------------------
 const APP_ID = "3c427b50bc824baebaca30a5de42af68"; 
 
 let client: IAgoraRTCClient | null = null;
 let localAudioTrack: IMicrophoneAudioTrack | null = null;
-let isRoomAudioMuted = false; // Track global mute state for this client
+let isRoomAudioMuted = false;
+let currentChannel = '';
 
-// Promise chain to serialize async operations (Join -> Leave -> Join)
-let operationQueue: Promise<void> = Promise.resolve();
+// Queue to prevent race conditions only for critical Join/Leave ops
+let connectionQueue: Promise<void> = Promise.resolve();
+
+// Helper Logger
+const log = (msg: string, err?: any) => {
+    // Uncomment for debugging
+    // if (err) console.error(`[Agora] ${msg}`, err);
+    // else console.log(`[Agora] ${msg}`);
+};
 
 export const initializeAgora = async () => {
     if (client) return;
 
+    log('Initializing Client...');
     client = AgoraRTC.createClient({ mode: "rtc", codec: "vp8" });
     
-    // Add listener for connection state change to debug and manage recovery
-    client.on("connection-state-change", (curState, prevState, reason) => {
-        console.log(`[Agora] State: ${prevState} -> ${curState} (Reason: ${reason})`);
-        if (curState === 'DISCONNECTED' && reason === 'UID_BANNED') {
-            console.error("User banned from channel");
-        }
-    });
-
+    // Auto-subscribe to all users instantly to ensure audio plays immediately
     client.on("user-published", async (user, mediaType) => {
         try {
-            await client!.subscribe(user, mediaType);
+            if (!client) return;
+            await client.subscribe(user, mediaType);
             if (mediaType === "audio") {
-                const remoteAudioTrack = user.audioTrack;
-                if (remoteAudioTrack) {
-                    remoteAudioTrack.play();
-                    // Apply current mute state to new user
-                    remoteAudioTrack.setVolume(isRoomAudioMuted ? 0 : 100);
-                }
+                user.audioTrack?.play();
+                // Apply global room mute setting immediately
+                user.audioTrack?.setVolume(isRoomAudioMuted ? 0 : 100);
             }
         } catch (e) {
-            console.warn("[Agora] Subscribe failed", e);
+            log("Auto-Subscribe failed", e);
         }
     });
 
     client.on("user-unpublished", (user) => {
-        // Automatically handled by SDK
+        // Agora handles cleanup automatically usually
     });
 };
 
-// Internal helper to stop tracks safely
-const stopLocalTrack = async () => {
-    if (localAudioTrack) {
-        try {
-            if (client && client.localTracks.includes(localAudioTrack)) {
-                await client.unpublish([localAudioTrack]);
-            }
-        } catch (e) {
-            console.warn("[Agora] Unpublish error", e);
-        }
-        localAudioTrack.stop();
-        localAudioTrack.close();
-        localAudioTrack = null;
-        console.log("✅ Local track stopped");
-    }
-};
-
-// Internal helper to reset client on critical errors
-const resetClient = async () => {
-    console.log("♻️ Hard Resetting Agora Client...");
-    await stopLocalTrack();
-    
-    if (client) {
-        const tempClient = client;
-        client = null; // Detach immediately to prevent race conditions
-        
-        tempClient.removeAllListeners();
-        try {
-            if (tempClient.connectionState === 'CONNECTED' || tempClient.connectionState === 'CONNECTING') {
-                await tempClient.leave();
-            }
-        } catch (e) {
-            console.warn("Error leaving during reset (ignored)", e);
-        }
-    }
-};
-
-// Function to join the channel (Queued with Retry)
+// 1. Join Channel (FAST & ROBUST)
 export const joinVoiceChannel = (channelName: string, uid: string | number) => {
-    operationQueue = operationQueue.then(async () => {
-        const attemptJoin = async (isRetry: boolean = false): Promise<void> => {
-            try {
-                if (!client) await initializeAgora();
-
-                // Safety check
-                if (!client) {
-                    if (!isRetry) {
-                        await resetClient();
-                        return attemptJoin(true);
-                    }
-                    return;
-                }
-
-                // 1. Check if already connected
-                if (client.connectionState === 'CONNECTED') {
-                    if (client.channelName === channelName) {
-                        console.log(`[Agora] Already connected to ${channelName}`);
-                        return;
-                    } else {
-                        await client.leave();
-                    }
-                }
-
-                // 2. Handle busy states
-                if (client.connectionState === 'CONNECTING' || client.connectionState === 'DISCONNECTING') {
-                    if (!isRetry) {
-                        await resetClient(); // Force clean
-                        return attemptJoin(true);
-                    }
-                }
-
-                // 3. Join
-                await client.join(APP_ID, channelName, null, uid);
-                console.log("✅ Joined voice channel successfully");
-
-            } catch (error: any) {
-                console.error(`❌ Agora Join Error (Retry: ${isRetry}):`, error);
-                
-                const msg = error.message || '';
-                const code = error.code || '';
-                const isFatal = code === 'WS_ABORT' || 
-                                code === 'CAN_NOT_GET_GATEWAY_SERVER' ||
-                                msg.includes('websocket') ||
-                                msg.includes('network') || 
-                                msg.includes('not ready');
-                
-                if (isFatal && !isRetry) {
-                    console.log("⚠️ Fatal WebSocket error detected. Resetting and retrying...");
-                    await resetClient();
-                    // Wait a moment for network/socket to clear
-                    await new Promise(r => setTimeout(r, 500));
-                    return attemptJoin(true);
-                }
-            }
-        };
-
-        await attemptJoin();
-    });
-    return operationQueue;
-};
-
-// Function to start broadcasting (Queued)
-export const publishMicrophone = (muted: boolean = false) => {
-    operationQueue = operationQueue.then(async () => {
+    // We queue joins to avoid "Join while leaving" errors, but we execute fast
+    connectionQueue = connectionQueue.then(async () => {
         try {
-            if (!client || client.connectionState !== 'CONNECTED') {
-                console.warn("[Agora] Cannot publish: Client not connected");
+            if (!client) await initializeAgora();
+            if (!client) return;
+
+            // If we are already in this channel and connected, DO NOTHING (Instant load)
+            if (client.connectionState === 'CONNECTED' && currentChannel === channelName) {
                 return;
             }
 
-            if (!localAudioTrack) {
-                localAudioTrack = await AgoraRTC.createMicrophoneAudioTrack();
+            // Leave previous channel if connected to a different one
+            if (client.connectionState === 'CONNECTED') {
+                await client.leave();
             }
-            
-            await localAudioTrack.setEnabled(!muted);
-            
-            // Only publish if not already published
-            if (!client.localTracks.includes(localAudioTrack)) {
-                 await client.publish([localAudioTrack]);
-                 console.log("✅ Published Microphone");
+
+            // Join immediately
+            await client.join(APP_ID, channelName, null, uid);
+            currentChannel = channelName;
+            log(`✅ Joined ${channelName}`);
+
+        } catch (error: any) {
+            log('Join Error', error);
+            // If websocket error, force reset
+            if (error?.code === 'WS_ABORT' || (error?.message && error.message.includes('websocket'))) {
+                 await leaveVoiceChannel();
             }
-        } catch (e) {
-            console.error("[Agora] Error publishing mic:", e);
         }
     });
-    return operationQueue;
+    return connectionQueue;
 };
 
-// Function to stop broadcasting (Queued)
-export const unpublishMicrophone = () => {
-    operationQueue = operationQueue.then(async () => {
-        await stopLocalTrack();
-    });
-    return operationQueue;
-};
+// 2. Switch Mic State (LIGHTNING FAST - BYPASS QUEUE)
+export const switchMicrophoneState = async (shouldPublish: boolean, muted: boolean = false) => {
+    if (!client) return;
 
-// Function to leave channel (Queued)
-export const leaveVoiceChannel = () => {
-    operationQueue = operationQueue.then(async () => {
-        try {
-            await stopLocalTrack();
+    try {
+        if (shouldPublish) {
+            // --- START TALKING ---
             
-            if (client) {
-                // Only leave if connected to avoid errors
-                if (client.connectionState === 'CONNECTED' || client.connectionState === 'CONNECTING') {
-                    await client.leave();
-                    console.log("✅ Left voice channel");
+            // 1. Prepare Track (Parallel to DB updates)
+            if (!localAudioTrack) {
+                // Create mic track with optimized settings for voice
+                localAudioTrack = await AgoraRTC.createMicrophoneAudioTrack({
+                    encoderConfig: "music_standard", 
+                    AEC: true, // Echo cancellation
+                    ANS: true  // Noise suppression
+                });
+            }
+
+            // 2. Local Mute (Instant feedback)
+            await localAudioTrack.setEnabled(!muted);
+
+            // 3. Publish (Network op)
+            // Only publish if not already published to avoid errors
+            if (client.connectionState === 'CONNECTED') {
+                // Check if already published to avoid error
+                const isPublished = client.localTracks.some(t => t.trackId === localAudioTrack?.trackId);
+                if (!isPublished) {
+                    await client.publish([localAudioTrack]);
+                    log('✅ Mic Published');
                 }
             }
-        } catch (error: any) {
-            console.error("❌ Agora Leave Error:", error);
-            await resetClient();
+        } else {
+            // --- STOP TALKING ---
+            
+            if (localAudioTrack) {
+                // Unpublish immediately
+                if (client.connectionState === 'CONNECTED') {
+                    await client.unpublish([localAudioTrack]).catch(e => log('Unpublish warn', e));
+                }
+                
+                // Stop and close track to release hardware
+                localAudioTrack.stop();
+                localAudioTrack.close();
+                localAudioTrack = null;
+                log('⏹️ Mic Unpublished');
+            }
         }
-    });
-    return operationQueue;
-};
-
-// Toggle Local Mic Mute (Instant action)
-export const toggleMicMute = async (muted: boolean) => {
-    if (localAudioTrack) {
-        try {
-            await localAudioTrack.setEnabled(!muted);
-        } catch (e) {
-            console.warn("Failed to toggle mic", e);
-        }
+    } catch (e) {
+        log("Mic Switch Error", e);
     }
 };
 
-// Toggle All Remote Audio (Speaker Mute)
+// Wrappers
+export const publishMicrophone = (muted: boolean) => switchMicrophoneState(true, muted);
+export const unpublishMicrophone = () => switchMicrophoneState(false);
+
+// 3. Leave Channel
+export const leaveVoiceChannel = async () => {
+    // Execute immediately, don't wait for queue if possible
+    try {
+        // Stop mic first
+        if (localAudioTrack) {
+            localAudioTrack.stop();
+            localAudioTrack.close();
+            localAudioTrack = null;
+        }
+        
+        if (client) {
+            await client.leave();
+            currentChannel = '';
+            log('Left Channel');
+        }
+    } catch (e) {
+        log('Leave Error', e);
+    }
+};
+
+// 4. Instant Mute (Local)
+export const toggleMicMute = async (muted: boolean) => {
+    if (localAudioTrack) {
+        await localAudioTrack.setEnabled(!muted);
+    }
+};
+
+// 5. Toggle Speaker (Hear others or not)
 export const toggleAllRemoteAudio = (muted: boolean) => {
     isRoomAudioMuted = muted;
     if (client) {
@@ -225,5 +175,4 @@ export const toggleAllRemoteAudio = (muted: boolean) => {
             }
         });
     }
-    console.log(`Speaker ${muted ? 'Muted' : 'Unmuted'}`);
 };

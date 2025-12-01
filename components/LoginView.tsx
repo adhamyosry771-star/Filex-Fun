@@ -124,14 +124,6 @@ const LoginView: React.FC<LoginViewProps> = ({ language, setLanguage, onGuestLog
               <Mail className="w-5 h-5" />
               {t('emailBtn')}
             </button>
-
-             <button 
-              onClick={onGuestLogin}
-              className="w-full border border-brand-500/30 text-brand-300 font-bold py-4 rounded-2xl flex items-center justify-center gap-3 hover:bg-brand-500/10 transition"
-            >
-              <UserIcon className="w-5 h-5" />
-              {t('guestBtn')}
-            </button>
             
             <p className="text-[10px] text-gray-500 text-center mt-6 px-4">{t('terms')}</p>
           </div>

@@ -25,10 +25,12 @@ import {
     where,
     limit,
     writeBatch,
-    increment
+    increment,
+    arrayUnion,
+    arrayRemove
   } from "firebase/firestore";
   import { auth, db } from "../firebaseConfig";
-  import { User, Room, ChatMessage, RoomSeat, Notification, FriendRequest, PrivateChatSummary, PrivateMessage, Banner } from "../types";
+  import { User, Room, ChatMessage, RoomSeat, Notification, FriendRequest, PrivateChatSummary, PrivateMessage, Banner, Contributor } from "../types";
   
   const googleProvider = new GoogleAuthProvider();
   const ADMIN_EMAIL = "admin@flex.com";
@@ -634,12 +636,15 @@ import {
               hostId: user.id,
               viewerCount: 1,
               thumbnail: cover,
+              backgroundImage: cover, // Initialize background with cover
               tags: ['Live', 'Chat'],
               isAiHost: false,
               seats: seats,
               isBanned: false,
               isHot: false,
-              contributors: {}
+              contributors: {},
+              bannedUsers: [],
+              admins: []
           };
 
           await setDoc(doc(db, "rooms", roomId), newRoom);
@@ -710,218 +715,97 @@ import {
       }
   };
 
-  export const listenToMessages = (roomId: string, callback: (messages: ChatMessage[]) => void): Unsubscribe => {
-    const q = query(collection(db, "rooms", roomId, "messages"), orderBy("timestamp", "asc"));
-    return onSnapshot(q, (snapshot) => {
-      const messages: ChatMessage[] = [];
-      snapshot.forEach((doc) => {
-        messages.push({ id: doc.id, ...doc.data() } as ChatMessage);
+  // --- ROOM MANAGEMENT (KICK / BAN / ADMINS) ---
+
+  export const kickUserFromSeat = async (roomId: string, seatIndex: number) => {
+      const roomRef = doc(db, "rooms", roomId);
+      await runTransaction(db, async (transaction) => {
+          const roomDoc = await transaction.get(roomRef);
+          if (!roomDoc.exists()) return;
+          const roomData = roomDoc.data() as Room;
+          const seats = roomData.seats;
+          
+          if (seats[seatIndex]) {
+              seats[seatIndex] = {
+                  ...seats[seatIndex],
+                  userId: null,
+                  userName: null,
+                  userAvatar: null,
+                  giftCount: 0,
+                  adminRole: null,
+                  isMuted: false
+              };
+              transaction.update(roomRef, { seats });
+          }
       });
-      callback(messages);
-    });
   };
 
-  export const sendMessage = async (roomId: string, message: ChatMessage) => {
+  export const banUserFromRoom = async (roomId: string, userId: string) => {
       try {
-          await addDoc(collection(db, "rooms", roomId, "messages"), message);
-      } catch (error: any) {
-          console.error("Error sending message:", error.message || "Unknown");
-          throw new Error(error.message || "Send message failed");
-      }
-  };
-
-  // --- SEAT MANAGEMENT ---
-
-  export const takeSeat = async (roomId: string, seatIndex: number, user: User) => {
-      try {
-        const roomRef = doc(db, "rooms", roomId);
-        await runTransaction(db, async (transaction) => {
-            const roomDoc = await transaction.get(roomRef);
-            if (!roomDoc.exists()) throw new Error("Room does not exist");
-            
-            const roomData = roomDoc.data() as Room;
-            const seats = roomData.seats || [];
-            
-            const existingSeat = seats.find(s => s.userId === user.id);
-            if (existingSeat) {
-                seats[existingSeat.index] = {
-                    ...seats[existingSeat.index],
-                    userId: null,
-                    userName: null,
-                    userAvatar: null,
-                    isMuted: false,
-                    adminRole: null
-                };
-            }
-
-            const targetSeat = seats.find(s => s.index === seatIndex);
-            if (!targetSeat) throw new Error("Seat not found");
-            if (targetSeat.userId) throw new Error("Seat occupied");
-            if (targetSeat.isLocked) throw new Error("Seat is locked");
-
-            seats[seatIndex] = {
-                ...targetSeat,
-                userId: user.id,
-                userName: user.name,
-                userAvatar: user.avatar,
-                isMuted: false,
-                adminRole: user.adminRole || null
-            };
-
-            transaction.update(roomRef, { seats });
-        });
-      } catch (e: any) {
-          const msg = e.message || "Unknown error";
-          console.error("Take seat error:", msg);
-          throw new Error(msg);
-      }
-  };
-
-  export const leaveSeat = async (roomId: string, user: User) => {
-      try {
-        const roomRef = doc(db, "rooms", roomId);
-        await runTransaction(db, async (transaction) => {
-            const roomDoc = await transaction.get(roomRef);
-            if (!roomDoc.exists()) return;
-            
-            const roomData = roomDoc.data() as Room;
-            const seats = roomData.seats || [];
-            
-            const targetSeat = seats.find(s => s.userId === user.id);
-            if (!targetSeat) return;
-
-            seats[targetSeat.index] = {
-                ...targetSeat,
-                userId: null,
-                userName: null,
-                userAvatar: null,
-                isMuted: false,
-                adminRole: null
-            };
-
-            transaction.update(roomRef, { seats });
-        });
-      } catch (e: any) {
-          console.error("Leave seat error:", e.message || "Unknown");
-      }
-  };
-
-  export const toggleSeatLock = async (roomId: string, seatIndex: number, isLocked: boolean) => {
-      try {
-        const roomRef = doc(db, "rooms", roomId);
-        const roomDoc = await getDoc(roomRef);
-        if (!roomDoc.exists()) return;
-
-        const seats = (roomDoc.data() as Room).seats;
-        seats[seatIndex].isLocked = isLocked;
-        
-        await updateDoc(roomRef, { seats });
-      } catch (e: any) {
-          console.error("Lock seat error:", e.message || "Unknown");
-      }
-  };
-
-  export const toggleSeatMute = async (roomId: string, seatIndex: number, isMuted: boolean) => {
-      try {
-        const roomRef = doc(db, "rooms", roomId);
-        const roomDoc = await getDoc(roomRef);
-        if (!roomDoc.exists()) return;
-
-        const seats = (roomDoc.data() as Room).seats;
-        seats[seatIndex].isMuted = isMuted;
-        
-        await updateDoc(roomRef, { seats });
-      } catch (e: any) {
-          console.error("Mute seat error:", e.message || "Unknown");
-      }
-  };
-
-  // --- TRANSACTIONS ---
-
-  export const sendGiftTransaction = async (roomId: string, senderUid: string, targetSeatIndex: number, cost: number) => {
-      try {
-          await runTransaction(db, async (transaction) => {
-              const roomRef = doc(db, "rooms", roomId);
-              const roomDoc = await transaction.get(roomRef);
-              if (!roomDoc.exists()) throw new Error("Room does not exist");
-              
-              const roomData = roomDoc.data() as Room;
-              const seats = roomData.seats || [];
-              const targetSeat = seats.find(s => s.index === targetSeatIndex);
-              
-              if (!targetSeat) throw new Error("Target seat not found");
-
-              const userRef = doc(db, "users", senderUid);
-              const userDoc = await transaction.get(userRef);
-              if (!userDoc.exists()) throw new Error("User not found");
-              
-              const userData = userDoc.data() as User;
-              const currentDiamonds = userData.wallet?.diamonds || 0;
-              const currentSpent = userData.diamondsSpent || 0;
-
-              if (currentDiamonds < cost) {
-                  throw new Error("Insufficient funds");
-              }
-
-              // Update Sender Balance
-              transaction.update(userRef, {
-                  "wallet.diamonds": currentDiamonds - cost,
-                  "diamondsSpent": currentSpent + cost
-              });
-
-              // Update Seat Gift Count
-              const updatedSeats = [...seats];
-              updatedSeats[targetSeatIndex] = {
-                  ...targetSeat,
-                  giftCount: (targetSeat.giftCount || 0) + 1
-              };
-
-              // Update Contributors (Leaderboard)
-              // We use a map for O(1) read/write
-              const currentContributors = roomData.contributors || {};
-              const senderId = userData.id || 'unknown'; 
-              const currentAmount = currentContributors[senderId]?.amount || 0;
-
-              // We reconstruct the contributor object to ensure it has latest avatar/name
-              const newContributors = {
-                  ...currentContributors,
-                  [senderId]: {
-                      userId: senderId,
-                      name: userData.name,
-                      avatar: userData.avatar,
-                      amount: currentAmount + cost
-                  }
-              };
-
-              transaction.update(roomRef, { seats: updatedSeats, contributors: newContributors });
+          const roomRef = doc(db, "rooms", roomId);
+          // 1. Add to ban list
+          await updateDoc(roomRef, {
+              bannedUsers: arrayUnion(userId)
           });
-      } catch (error: any) {
-          console.error("Gift transaction failed:", error.message || "Unknown");
-          throw new Error(error.message || "Gift failed");
+      } catch (e: any) {
+          console.error("Ban user failed", e);
       }
   };
 
-  // --- BANNERS / SLIDER ---
+  export const unbanUserFromRoom = async (roomId: string, userId: string) => {
+      try {
+          const roomRef = doc(db, "rooms", roomId);
+          await updateDoc(roomRef, {
+              bannedUsers: arrayRemove(userId)
+          });
+      } catch (e: any) {
+          console.error("Unban user failed", e);
+      }
+  };
 
-  export const addBanner = async (imageUrl: string, title?: string) => {
+  export const addRoomAdmin = async (roomId: string, userId: string) => {
+      try {
+          const roomRef = doc(db, "rooms", roomId);
+          await updateDoc(roomRef, {
+              admins: arrayUnion(userId)
+          });
+      } catch (e: any) {
+          console.error("Add room admin failed", e);
+      }
+  };
+
+  export const removeRoomAdmin = async (roomId: string, userId: string) => {
+      try {
+          const roomRef = doc(db, "rooms", roomId);
+          await updateDoc(roomRef, {
+              admins: arrayRemove(userId)
+          });
+      } catch (e: any) {
+          console.error("Remove room admin failed", e);
+      }
+  };
+
+  // --- BANNERS ---
+
+  export const addBanner = async (imageUrl: string, title: string) => {
       try {
           await addDoc(collection(db, "banners"), {
               imageUrl,
-              title: title || '',
+              title,
               timestamp: Date.now()
           });
       } catch (e: any) {
-          console.error("Add banner failed:", e.message || "Unknown");
-          throw new Error("Add banner failed");
+          console.error("Add banner failed", e);
+          throw e;
       }
   };
 
-  export const deleteBanner = async (bannerId: string) => {
+  export const deleteBanner = async (id: string) => {
       try {
-          await deleteDoc(doc(db, "banners", bannerId));
+          await deleteDoc(doc(db, "banners", id));
       } catch (e: any) {
-          console.error("Delete banner failed:", e.message || "Unknown");
-          throw new Error("Delete banner failed");
+          console.error("Delete banner failed", e);
+          throw e;
       }
   };
 
@@ -929,76 +813,215 @@ import {
       const q = query(collection(db, "banners"), orderBy("timestamp", "desc"));
       return onSnapshot(q, (snapshot) => {
           const banners: Banner[] = [];
-          snapshot.forEach(doc => {
-              banners.push({ id: doc.id, ...doc.data() } as Banner);
-          });
+          snapshot.forEach(doc => banners.push({ id: doc.id, ...doc.data() } as Banner));
           callback(banners);
-      }, (e) => {
-          console.log("Banner fetch fallback");
-          const q2 = query(collection(db, "banners"));
-          onSnapshot(q2, (snap) => {
-              const b: Banner[] = [];
-              snap.forEach(d => b.push({id: d.id, ...d.data()} as Banner));
-              callback(b);
-          });
       });
   };
 
-  // --- AGENCY SYSTEM ---
+  // --- AGENCY TRANSFERS ---
 
-  export const transferAgencyDiamonds = async (agentUid: string, targetDisplayId: string, amount: number) => {
+  export const transferAgencyDiamonds = async (agencyUid: string, targetDisplayId: string, amount: number) => {
+      const targetUser = await searchUserByDisplayId(targetDisplayId);
+      if (!targetUser || !targetUser.uid) {
+          throw new Error("Target user not found");
+      }
+      const targetUid = targetUser.uid;
+
       try {
-          // Find Target User by Display ID
-          const usersRef = collection(db, "users");
-          const q = query(usersRef, where("id", "==", targetDisplayId));
-          const querySnapshot = await getDocs(q);
-          
-          if (querySnapshot.empty) {
-              throw new Error("User not found");
-          }
-          const targetUserDoc = querySnapshot.docs[0];
-          const targetUid = targetUserDoc.id;
-
           await runTransaction(db, async (transaction) => {
-              // Get Agent
-              const agentRef = doc(db, "users", agentUid);
-              const agentDoc = await transaction.get(agentRef);
-              if (!agentDoc.exists()) throw new Error("Agent not found");
-              
-              const agentData = agentDoc.data() as User;
-              if (!agentData.isAgent) throw new Error("User is not an agent");
-              
-              const currentBalance = agentData.agencyBalance || 0;
-              if (currentBalance < amount) throw new Error("Insufficient agency balance");
-
-              // Get Target
+              const agencyRef = doc(db, "users", agencyUid);
               const targetRef = doc(db, "users", targetUid);
+
+              const agencyDoc = await transaction.get(agencyRef);
               const targetDoc = await transaction.get(targetRef);
-              if (!targetDoc.exists()) throw new Error("Target user error");
+
+              if (!agencyDoc.exists()) throw new Error("Agency user not found");
+              if (!targetDoc.exists()) throw new Error("Target user not found");
+
+              const agencyData = agencyDoc.data() as User;
               const targetData = targetDoc.data() as User;
 
-              // Update Agent
-              transaction.update(agentRef, {
+              const currentBalance = agencyData.agencyBalance || 0;
+              if (currentBalance < amount) {
+                  throw new Error("Insufficient agency balance");
+              }
+
+              // Deduct from Agency
+              transaction.update(agencyRef, {
                   agencyBalance: currentBalance - amount
               });
 
-              // Update Target
-              const currentDiamonds = targetData.wallet?.diamonds || 0;
+              // Add to Target
+              const currentTargetDiamonds = targetData.wallet?.diamonds || 0;
               transaction.update(targetRef, {
-                  "wallet.diamonds": currentDiamonds + amount
+                  wallet: {
+                      ...targetData.wallet,
+                      diamonds: currentTargetDiamonds + amount,
+                      coins: targetData.wallet?.coins || 0
+                  }
               });
               
-              // Log transaction (Optional: create collection 'agency_logs')
-              const logRef = doc(collection(db, "agency_logs"));
-              transaction.set(logRef, {
-                  agentId: agentData.id,
-                  targetId: targetData.id,
-                  amount: amount,
-                  timestamp: Date.now()
+              const notificationRef = doc(collection(db, `users/${targetUid}/notifications`));
+              transaction.set(notificationRef, {
+                  type: 'system',
+                  title: 'شحن وكالة',
+                  body: `تم شحن ${amount} ماسة إلى حسابك من قبل الوكيل ${agencyData.name}`,
+                  timestamp: Date.now(),
+                  read: false
               });
           });
       } catch (e: any) {
-          console.error("Agency Transfer Error:", e.message || "Unknown");
-          throw new Error(e.message || "Transfer failed");
+          console.error("Transfer failed", e);
+          throw e;
       }
+  };
+
+  // --- ROOM CHAT ---
+
+  export const sendMessage = async (roomId: string, message: ChatMessage) => {
+      try {
+          await setDoc(doc(db, `rooms/${roomId}/messages`, message.id), message);
+      } catch (e) {
+          console.error("Send message error", e);
+          throw e;
+      }
+  };
+
+  export const listenToMessages = (roomId: string, callback: (msgs: ChatMessage[]) => void): Unsubscribe => {
+      const q = query(collection(db, `rooms/${roomId}/messages`), orderBy('timestamp', 'asc'), limit(50));
+      return onSnapshot(q, (snapshot) => {
+          const msgs: ChatMessage[] = [];
+          snapshot.forEach(doc => msgs.push(doc.data() as ChatMessage));
+          callback(msgs);
+      });
+  };
+
+  // --- ROOM INTERACTION (Seats, Gifts) ---
+
+  export const takeSeat = async (roomId: string, seatIndex: number, user: User) => {
+      const roomRef = doc(db, "rooms", roomId);
+      
+      await runTransaction(db, async (transaction) => {
+          const roomDoc = await transaction.get(roomRef);
+          if (!roomDoc.exists()) throw new Error("Room not found");
+          
+          const roomData = roomDoc.data() as Room;
+          const seats = roomData.seats || [];
+          
+          if (seats[seatIndex].userId) throw new Error("Seat already taken");
+          if (seats[seatIndex].isLocked) throw new Error("Seat is locked");
+          
+          const existingSeatIndex = seats.findIndex(s => s.userId === user.id); 
+          
+          if (existingSeatIndex !== -1) {
+               seats[existingSeatIndex].userId = null;
+               seats[existingSeatIndex].userName = null;
+               seats[existingSeatIndex].userAvatar = null;
+               seats[existingSeatIndex].giftCount = 0;
+               seats[existingSeatIndex].adminRole = null;
+               seats[existingSeatIndex].isMuted = false; 
+          }
+
+          seats[seatIndex].userId = user.id;
+          seats[seatIndex].userName = user.name;
+          seats[seatIndex].userAvatar = user.avatar;
+          seats[seatIndex].adminRole = user.adminRole;
+          seats[seatIndex].isMuted = false; 
+
+          transaction.update(roomRef, { seats });
+      });
+  };
+
+  export const leaveSeat = async (roomId: string, user: User) => {
+      const roomRef = doc(db, "rooms", roomId);
+      await runTransaction(db, async (transaction) => {
+          const roomDoc = await transaction.get(roomRef);
+          if (!roomDoc.exists()) return;
+          
+          const roomData = roomDoc.data() as Room;
+          const seats = roomData.seats || [];
+          const seatIndex = seats.findIndex(s => s.userId === user.id);
+          
+          if (seatIndex !== -1) {
+              seats[seatIndex].userId = null;
+              seats[seatIndex].userName = null;
+              seats[seatIndex].userAvatar = null;
+              seats[seatIndex].giftCount = 0;
+              seats[seatIndex].adminRole = null;
+              seats[seatIndex].isMuted = false;
+              
+              transaction.update(roomRef, { seats });
+          }
+      });
+  };
+
+  export const toggleSeatLock = async (roomId: string, seatIndex: number, isLocked: boolean) => {
+      const roomRef = doc(db, "rooms", roomId);
+      await runTransaction(db, async (transaction) => {
+          const roomDoc = await transaction.get(roomRef);
+          if (!roomDoc.exists()) return;
+          const roomData = roomDoc.data() as Room;
+          const seats = roomData.seats || [];
+          
+          if (seats[seatIndex]) {
+              seats[seatIndex].isLocked = isLocked;
+              transaction.update(roomRef, { seats });
+          }
+      });
+  };
+
+  export const toggleSeatMute = async (roomId: string, seatIndex: number, isMuted: boolean) => {
+       const roomRef = doc(db, "rooms", roomId);
+      await runTransaction(db, async (transaction) => {
+          const roomDoc = await transaction.get(roomRef);
+          if (!roomDoc.exists()) return;
+          const roomData = roomDoc.data() as Room;
+          const seats = roomData.seats || [];
+          
+          if (seats[seatIndex]) {
+              seats[seatIndex].isMuted = isMuted;
+              transaction.update(roomRef, { seats });
+          }
+      });
+  };
+
+  export const sendGiftTransaction = async (roomId: string, senderUid: string, targetSeatIndex: number, cost: number) => {
+       await runTransaction(db, async (transaction) => {
+          const roomRef = doc(db, "rooms", roomId);
+          const senderRef = doc(db, "users", senderUid);
+          
+          const roomDoc = await transaction.get(roomRef);
+          const senderDoc = await transaction.get(senderRef);
+          
+          if (!roomDoc.exists()) throw new Error("Room not found");
+          if (!senderDoc.exists()) throw new Error("Sender not found");
+          
+          const senderData = senderDoc.data() as User;
+          const roomData = roomDoc.data() as Room;
+          
+          const wallet = senderData.wallet || { diamonds: 0, coins: 0 };
+          if (wallet.diamonds < cost) throw new Error("Insufficient funds");
+          
+          const newBalance = wallet.diamonds - cost;
+          const newSpent = (senderData.diamondsSpent || 0) + cost;
+          transaction.update(senderRef, {
+              wallet: { ...wallet, diamonds: newBalance },
+              diamondsSpent: newSpent
+          });
+          
+          const seats = roomData.seats || [];
+          const targetSeat = seats.find(s => s.index === targetSeatIndex);
+          
+          const contributors = roomData.contributors || {};
+          if (!contributors[senderUid]) {
+              contributors[senderUid] = { userId: senderUid, name: senderData.name, avatar: senderData.avatar, amount: 0 };
+          }
+          contributors[senderUid].amount += cost;
+
+          if (targetSeat) {
+              targetSeat.giftCount += cost;
+          }
+
+          transaction.update(roomRef, { contributors, seats });
+       });
   };

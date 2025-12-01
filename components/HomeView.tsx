@@ -52,7 +52,7 @@ const HomeView: React.FC<HomeViewProps> = ({ rooms, onJoinRoom, language, userPr
         party: { ar: 'حفلات', en: 'Party' },
         createRoom: { ar: 'إنشاء غرفة', en: 'Create Room' },
         roomName: { ar: 'اسم الغرفة', en: 'Room Name' },
-        bg: { ar: 'اختر خلفية', en: 'Select Background' },
+        bg: { ar: 'اختر غلاف الغرفة', en: 'Select Room Cover' },
         create: { ar: 'إنشاء', en: 'Create' },
         cancel: { ar: 'إلغاء', en: 'Cancel' },
         noRooms: { ar: 'لا توجد غرف مطابقة. كن أول من ينشئ غرفة!', en: 'No matching rooms. Be the first to create one!' },
@@ -358,27 +358,34 @@ const HomeView: React.FC<HomeViewProps> = ({ rooms, onJoinRoom, language, userPr
 
                       <div>
                           <label className="text-xs text-gray-400 mb-2 block">{t('bg')}</label>
-                          <div className="grid grid-cols-4 gap-2">
-                                {ROOM_BACKGROUNDS.slice(0, 3).map((bg, i) => (
+                          
+                          {/* Horizontal Scroll Image List */}
+                          <div className="flex gap-3 overflow-x-auto pb-4 pt-1 px-1 scrollbar-hide">
+                                {/* Upload Button */}
+                                <label className="shrink-0 w-24 h-24 rounded-lg border-2 border-dashed border-gray-600 flex flex-col items-center justify-center cursor-pointer hover:border-brand-500 hover:bg-white/5 transition bg-white/5 group">
+                                    <input type="file" accept="image/*" className="hidden" onChange={handleBgUpload} />
+                                    <div className="w-8 h-8 rounded-full bg-gray-700 flex items-center justify-center group-hover:bg-brand-500 transition mb-1">
+                                        <Upload className="w-4 h-4 text-white" />
+                                    </div>
+                                    <span className="text-[7px] text-gray-500 font-bold">{t('uploadBg')}</span>
+                                </label>
+
+                                {/* Presets */}
+                                {ROOM_BACKGROUNDS.map((bg, i) => (
                                     <button 
-                                    key={i} 
-                                    onClick={() => setSelectedBg(bg)}
-                                    className={`aspect-square rounded-lg overflow-hidden border-2 relative ${selectedBg === bg ? 'border-brand-500' : 'border-transparent'}`}
+                                        key={i} 
+                                        onClick={() => setSelectedBg(bg)}
+                                        className={`shrink-0 w-24 h-24 rounded-lg overflow-hidden border-2 relative transition hover:scale-105 ${selectedBg === bg ? 'border-brand-500 ring-2 ring-brand-500/30' : 'border-transparent border-white/10'}`}
                                     >
                                         <img src={bg} className="w-full h-full object-cover" />
+                                        {selectedBg === bg && (
+                                            <div className="absolute inset-0 bg-brand-500/40 flex items-center justify-center backdrop-blur-[1px]">
+                                                <div className="bg-white rounded-full p-1 shadow-lg"><BadgeCheck className="w-5 h-5 text-brand-600 fill-white" /></div>
+                                            </div>
+                                        )}
                                     </button>
                                 ))}
-                                <label className={`aspect-square rounded-lg border-2 border-dashed border-gray-600 flex flex-col items-center justify-center cursor-pointer hover:border-brand-500 hover:bg-white/5 transition ${selectedBg.startsWith('data:') ? 'border-brand-500' : ''}`}>
-                                    <input type="file" accept="image/*" className="hidden" onChange={handleBgUpload} />
-                                    <Upload className="w-5 h-5 text-gray-400" />
-                                    <span className="text-[8px] text-gray-500 mt-1">{t('uploadBg')}</span>
-                                </label>
                           </div>
-                          {selectedBg.startsWith('data:') && (
-                              <div className="mt-2 text-xs text-brand-400 flex items-center gap-1">
-                                  <ImageIcon className="w-3 h-3" /> Custom Image Selected
-                              </div>
-                          )}
                       </div>
                       
                       <div className="flex gap-2 pt-2">

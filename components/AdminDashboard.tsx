@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { Shield, Trash2, Ban, Search, Gift, Crown, ArrowLeft, RefreshCw, CheckCircle, Megaphone, Edit3, Send, Home, XCircle, Flame, Image as ImageIcon, Plus, X, Database } from 'lucide-react';
+import { Shield, Trash2, Ban, Search, Gift, Crown, ArrowLeft, RefreshCw, CheckCircle, Megaphone, Edit3, Send, Home, XCircle, Flame, Image as ImageIcon, Plus, X, Database, Clock } from 'lucide-react';
 import { getAllUsers, adminUpdateUser, deleteAllRooms, sendSystemNotification, broadcastOfficialMessage, searchUserByDisplayId, getRoomByHostId, adminBanRoom, deleteRoom, toggleRoomHotStatus, addBanner, deleteBanner, listenToBanners } from '../services/firebaseService';
 import { Language, User, Room, Banner } from '../types';
 import { VIP_TIERS, ADMIN_ROLES } from '../constants';
@@ -33,6 +33,10 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, language }) => 
   
   const [showIdModal, setShowIdModal] = useState<string | null>(null);
   const [newCustomId, setNewCustomId] = useState('');
+
+  // Ban Modal
+  const [showBanModal, setShowBanModal] = useState<string | null>(null);
+  const [banDuration, setBanDuration] = useState<number>(-1); // -1 Permanent, 1, 3, 7, 30 days
 
   const [officialTitle, setOfficialTitle] = useState('');
   const [officialBody, setOfficialBody] = useState('');
@@ -69,19 +73,53 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, language }) => 
       setLoading(false);
   };
 
-  const handleBanUser = async (uid: string, currentStatus: boolean) => {
+  // Pre-step to open modal or unban immediately
+  const initiateBanAction = (user: User) => {
+      if (user.isBanned) {
+          // Unban directly
+          confirmBanUser(user.uid!, false);
+      } else {
+          // Open Ban Modal
+          setShowBanModal(user.uid!);
+          setBanDuration(-1); // Default to permanent
+      }
+  };
+
+  const confirmBanUser = async (uid: string, shouldBan: boolean) => {
       setActionLoading(uid);
       try {
-          await adminUpdateUser(uid, { isBanned: !currentStatus });
+          const updateData: Partial<User> = { isBanned: shouldBan };
+          
+          if (shouldBan) {
+              updateData.isPermanentBan = banDuration === -1;
+              if (banDuration !== -1) {
+                  const expiryDate = new Date();
+                  expiryDate.setDate(expiryDate.getDate() + banDuration);
+                  updateData.banExpiresAt = expiryDate.getTime();
+              } else {
+                  updateData.banExpiresAt = 0;
+              }
+          } else {
+              updateData.isPermanentBan = false;
+              updateData.banExpiresAt = 0;
+          }
+
+          await adminUpdateUser(uid, updateData);
+          
           // Update local state
           if (searchedUser && searchedUser.uid === uid) {
-              setSearchedUser({...searchedUser, isBanned: !currentStatus});
+              setSearchedUser({...searchedUser, ...updateData});
           }
           await fetchUsers();
+          
+          if (shouldBan) alert("تم حظر المستخدم بنجاح");
+          else alert("تم فك الحظر بنجاح");
+
       } catch (e) {
           alert("فشل تحديث حالة الحظر");
       }
       setActionLoading(null);
+      setShowBanModal(null);
   };
 
   const handleSetAdminRole = async (uid: string, role: 'super_admin' | 'admin' | null) => {
@@ -446,7 +484,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, language }) => 
                                           <button onClick={() => setShowGiftModal(searchedUser.uid!)} className="bg-blue-900/30 text-blue-400 py-1.5 rounded text-xs flex items-center justify-center gap-1"><Gift className="w-3 h-3"/> شحن</button>
                                           <button onClick={() => setShowVipModal(searchedUser.uid!)} className="bg-yellow-900/30 text-yellow-400 py-1.5 rounded text-xs flex items-center justify-center gap-1"><Crown className="w-3 h-3"/> VIP</button>
                                           <button onClick={() => setShowIdModal(searchedUser.uid!)} className="bg-purple-900/30 text-purple-400 py-1.5 rounded text-xs flex items-center justify-center gap-1"><Edit3 className="w-3 h-3"/> ID</button>
-                                          <button onClick={() => handleBanUser(searchedUser.uid!, searchedUser.isBanned || false)} disabled={searchedUser.id === 'OFFECAL'} className={`py-1.5 rounded text-xs flex items-center justify-center gap-1 ${searchedUser.isBanned ? 'bg-green-600 text-white' : 'bg-red-600 text-white'}`}>
+                                          <button onClick={() => initiateBanAction(searchedUser)} disabled={searchedUser.id === 'OFFECAL'} className={`py-1.5 rounded text-xs flex items-center justify-center gap-1 ${searchedUser.isBanned ? 'bg-green-600 text-white' : 'bg-red-600 text-white'}`}>
                                               {searchedUser.isBanned ? 'فك الحظر' : 'حظر الحساب'}
                                           </button>
                                       </div>
@@ -539,7 +577,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, language }) => 
                                   <button onClick={() => setShowGiftModal(user.uid)} className="p-1.5 bg-blue-900/30 text-blue-400 rounded"><Gift className="w-4 h-4" /></button>
                                   <button onClick={() => setShowVipModal(user.uid)} className="p-1.5 bg-yellow-900/30 text-yellow-400 rounded"><Crown className="w-4 h-4" /></button>
                                   <button onClick={() => setShowIdModal(user.uid)} className="p-1.5 bg-purple-900/30 text-purple-400 rounded"><Edit3 className="w-4 h-4" /></button>
-                                  <button onClick={() => handleBanUser(user.uid, user.isBanned)} disabled={user.isAdmin} className={`p-1.5 rounded ${user.isBanned ? 'bg-green-900/30 text-green-400' : 'bg-red-900/30 text-red-400'}`}>
+                                  <button onClick={() => initiateBanAction(user)} disabled={user.isAdmin} className={`p-1.5 rounded ${user.isBanned ? 'bg-green-900/30 text-green-400' : 'bg-red-900/30 text-red-400'}`}>
                                       {user.isBanned ? <CheckCircle className="w-4 h-4" /> : <Ban className="w-4 h-4" />}
                                   </button>
                               </div>
@@ -675,6 +713,39 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, language }) => 
                   <button onClick={() => handleDeleteRooms()} disabled={actionLoading === 'system'} className="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-3 rounded-lg mt-4">
                       {actionLoading === 'system' ? 'جاري الحذف...' : 'حذف جميع الرومات'}
                   </button>
+              </div>
+          </div>
+      )}
+
+      {/* Ban Modal */}
+      {showBanModal && (
+          <div className="absolute inset-0 z-50 bg-black/90 backdrop-blur flex items-center justify-center p-4">
+              <div className="bg-gray-900 border border-red-500 rounded-xl p-5 w-full max-w-sm shadow-2xl text-right">
+                  <h3 className="text-red-500 font-bold mb-4 flex items-center gap-2">
+                      <Ban className="w-5 h-5"/> حظر المستخدم
+                  </h3>
+                  <div className="space-y-2 mb-6">
+                      <p className="text-gray-400 text-sm mb-2">اختر مدة الحظر:</p>
+                      {[1, 3, 7, 30].map(days => (
+                          <button 
+                            key={days}
+                            onClick={() => setBanDuration(days)}
+                            className={`w-full p-2 rounded text-sm font-bold border transition ${banDuration === days ? 'bg-red-600 text-white border-red-600' : 'bg-black border-gray-700 text-gray-300'}`}
+                          >
+                              {days} يوم
+                          </button>
+                      ))}
+                      <button 
+                        onClick={() => setBanDuration(-1)}
+                        className={`w-full p-2 rounded text-sm font-bold border transition ${banDuration === -1 ? 'bg-red-900 text-white border-red-600' : 'bg-black border-gray-700 text-red-400'}`}
+                      >
+                          حظر دائم ⛔
+                      </button>
+                  </div>
+                  <div className="flex gap-2">
+                      <button onClick={() => confirmBanUser(showBanModal, true)} className="flex-1 bg-red-600 text-white py-2 rounded font-bold">تأكيد الحظر</button>
+                      <button onClick={() => setShowBanModal(null)} className="flex-1 bg-gray-700 text-white py-2 rounded">إلغاء</button>
+                  </div>
               </div>
           </div>
       )}

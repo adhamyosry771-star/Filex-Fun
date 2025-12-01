@@ -19,7 +19,7 @@ import AgencyView from './components/AgencyView';
 import { ViewState, Room, User, Language, PrivateChatSummary } from './types';
 import { auth } from './firebaseConfig';
 import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
-import { getUserProfile, createUserProfile, logoutUser, listenToRooms, updateUserProfile, listenToUserProfile, listenToChatList, initiatePrivateChat, searchUserByDisplayId, incrementViewerCount } from './services/firebaseService';
+import { getUserProfile, createUserProfile, logoutUser, listenToRooms, updateUserProfile, listenToUserProfile, listenToChatList, initiatePrivateChat, searchUserByDisplayId, incrementViewerCount, adminUpdateUser } from './services/firebaseService';
 import { CURRENT_USER, STORE_ITEMS, VIP_TIERS, ADMIN_ROLES, LEVEL_ICONS, CHARM_ICONS } from './constants';
 
 const App: React.FC = () => {
@@ -67,15 +67,27 @@ const App: React.FC = () => {
         setAuthUser(user);
         
         // Listen Profile
-        profileUnsubscribe = listenToUserProfile(user.uid, (profile) => {
+        profileUnsubscribe = listenToUserProfile(user.uid, async (profile) => {
             if (profile) {
                  if (profile.isBanned) {
-                    alert("🚫 Account Banned.");
-                    logoutUser();
-                    setAuthUser(null);
-                    setUserProfile(null);
-                    setIsLoading(false);
-                    return;
+                    // Check expiration
+                    if (!profile.isPermanentBan && profile.banExpiresAt && profile.banExpiresAt < Date.now()) {
+                        // Ban expired, auto unban
+                        await adminUpdateUser(user.uid, { isBanned: false, banExpiresAt: 0, isPermanentBan: false });
+                    } else {
+                        // Still Banned
+                        const dateStr = profile.banExpiresAt ? new Date(profile.banExpiresAt).toLocaleString(language === 'ar' ? 'ar-EG' : 'en-US') : '';
+                        const banMsg = profile.isPermanentBan 
+                            ? (language === 'ar' ? "⛔ تم حظر حسابك بشكل دائم من قبل الإدارة." : "⛔ Your account has been permanently banned.")
+                            : (language === 'ar' ? `⚠️ حسابك محظور مؤقتاً.\nسيتم رفع الحظر في: ${dateStr}` : `⚠️ Account Suspended.\nBan expires on: ${dateStr}`);
+                        
+                        alert(banMsg);
+                        logoutUser();
+                        setAuthUser(null);
+                        setUserProfile(null);
+                        setIsLoading(false);
+                        return;
+                    }
                 }
                 setUserProfile(profile);
                 setIsOnboarding(false);
@@ -106,7 +118,7 @@ const App: React.FC = () => {
         if (profileUnsubscribe) profileUnsubscribe();
         if (chatsUnsubscribe) chatsUnsubscribe();
     };
-  }, [isGuest]);
+  }, [isGuest, language]);
 
   useEffect(() => {
     const unsubscribe = listenToRooms((updatedRooms) => {

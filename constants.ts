@@ -53,12 +53,18 @@ export const CHARM_ICONS = [
 ];
 
 export const ROOM_BACKGROUNDS = [
-  'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?q=80&w=600&auto=format&fit=crop',
-  'https://images.unsplash.com/photo-1519681393798-3828fb4090bb?q=80&w=600&auto=format&fit=crop',
-  'https://images.unsplash.com/photo-1470071459604-3b5ec3a7fe05?q=80&w=600&auto=format&fit=crop',
-  'https://images.unsplash.com/photo-1557683316-973673baf926?q=80&w=600&auto=format&fit=crop',
-  'https://images.unsplash.com/photo-1534067783741-514d4dddb79e?q=80&w=600&auto=format&fit=crop',
-  'https://images.unsplash.com/photo-1614850523060-8da1d56ae167?q=80&w=600&auto=format&fit=crop',
+  'https://images.unsplash.com/photo-1566008885218-40bdb64a663e?q=80&w=800&auto=format&fit=crop', 
+  'https://images.unsplash.com/photo-1492144534655-ae79c964c9d7?q=80&w=800&auto=format&fit=crop', 
+  'https://images.unsplash.com/photo-1580273916550-e323be2ae537?q=80&w=800&auto=format&fit=crop', 
+  'https://images.unsplash.com/photo-1605559424843-9e4c228bf1c2?q=80&w=800&auto=format&fit=crop', 
+  'https://images.unsplash.com/photo-1472214103451-9374bd1c798e?q=80&w=800&auto=format&fit=crop', 
+  'https://images.unsplash.com/photo-1441974231531-c6227db76b6e?q=80&w=800&auto=format&fit=crop', 
+  'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?q=80&w=800&auto=format&fit=crop', 
+  'https://images.unsplash.com/photo-1519681393798-3828fb4090bb?q=80&w=800&auto=format&fit=crop', 
+  'https://images.unsplash.com/photo-1518173946687-a4c8892bbd9f?q=80&w=800&auto=format&fit=crop', 
+  'https://images.unsplash.com/photo-1528722828814-77b9b8a90204?q=80&w=800&auto=format&fit=crop', 
+  'https://images.unsplash.com/photo-1534067783741-514d4dddb79e?q=80&w=800&auto=format&fit=crop', 
+  'https://images.unsplash.com/photo-1557683316-973673baf926?q=80&w=800&auto=format&fit=crop', 
 ];
 
 export const GAMES: Game[] = [
@@ -85,73 +91,7 @@ export const GAMES: Game[] = [
         name: { ar: 'الروليت الملكي', en: 'Royal Roulette' },
         icon: '🎱',
         bgImage: 'https://images.unsplash.com/photo-1606167668584-78701c57f13d?q=80&w=300&auto=format&fit=crop'
-    },
-    {
-        id: 'blackjack_pro',
-        name: { ar: 'بلاك جاك', en: 'Blackjack Pro' },
-        icon: '♠️',
-        bgImage: 'https://images.unsplash.com/photo-1509042239860-f550ce710b93?q=80&w=300&auto=format&fit=crop'
-    },
-    {
-        id: 'horse_racing',
-        name: { ar: 'سباق الخيل', en: 'Horse Racing' },
-        icon: '🏇',
-        bgImage: 'https://images.unsplash.com/photo-1552084705-2d33400a44d0?q=80&w=300&auto=format&fit=crop'
-    },
-    {
-        id: 'dice_duel',
-        name: { ar: 'حرب النرد', en: 'Dice Duel' },
-        icon: '🎲',
-        bgImage: 'https://images.unsplash.com/photo-1522069213448-443a614da9b6?q=80&w=300&auto=format&fit=crop'
-    },
-    {
-        id: 'crypto_crash',
-        name: { ar: 'تحطم الكريبتو', en: 'Crypto Crash' },
-        icon: '📉',
-        bgImage: 'https://images.unsplash.com/photo-1621504450168-38f6854cb186?q=80&w=300&auto=format&fit=crop'
-    },
-    {
-        id: 'fruit_splash',
-        name: { ar: 'فواكه الحظ', en: 'Fruit Splash' },
-        icon: '🍒',
-        bgImage: 'https://images.unsplash.com/photo-1519999482648-25049ddd37b1?q=80&w=300&auto=format&fit=crop'
-    },
-    {
-        id: 'lucky_7',
-        name: { ar: 'الرقم 7', en: 'Lucky 7' },
-        icon: '7️⃣',
-        bgImage: 'https://images.unsplash.com/photo-1605806616949-1e87b487bc2a?q=80&w=300&auto=format&fit=crop'
-    },
-    {
-        id: 'bingo_bash',
-        name: { ar: 'بينجو', en: 'Bingo Bash' },
-        icon: '🎱',
-        bgImage: 'https://images.unsplash.com/photo-1533230948925-502a5538e146?q=80&w=300&auto=format&fit=crop'
-    },
-    {
-        id: 'scratch_cards',
-        name: { ar: 'كروت الخدش', en: 'Scratch Cards' },
-        icon: '🎫',
-        bgImage: 'https://images.unsplash.com/photo-1589829085413-56de8ae18c73?q=80&w=300&auto=format&fit=crop'
-    },
-    {
-        id: 'lotto_win',
-        name: { ar: 'لوتو', en: 'Lotto Win' },
-        icon: '🔢',
-        bgImage: 'https://images.unsplash.com/photo-1518688248740-75979c5a9094?q=80&w=300&auto=format&fit=crop'
-    },
-    {
-        id: 'guess_high',
-        name: { ar: 'أعلى أم أقل', en: 'High Low' },
-        icon: '⬆️',
-        bgImage: 'https://images.unsplash.com/photo-1600325492264-77c87c943141?q=80&w=300&auto=format&fit=crop'
-    },
-    {
-        id: 'minesweeper',
-        name: { ar: 'كاسحة الألغام', en: 'Minesweeper' },
-        icon: '💣',
-        bgImage: 'https://images.unsplash.com/photo-1599583236049-741c8882583e?q=80&w=300&auto=format&fit=crop'
-    },
+    }
 ];
 
 export const ADMIN_ROLES = {
@@ -177,26 +117,23 @@ export const VIP_TIERS: VipTier[] = [
 ];
 
 export const GIFTS: Gift[] = [
-  { id: 'rose', name: 'Rose', icon: '🌹', cost: 1 },
-  { id: 'heart', name: 'Heart', icon: '❤️', cost: 5 },
-  { id: 'chocolate', name: 'Chocolate', icon: '🍫', cost: 10 },
-  { id: 'star', name: 'Star', icon: '⭐', cost: 20 },
-  { id: 'diamond', name: 'Diamond', icon: '💎', cost: 50 },
-  { id: 'crown', name: 'Crown', icon: '👑', cost: 100 },
-  { id: 'car', name: 'Sports Car', icon: '🏎️', cost: 500 },
-  { id: 'castle', name: 'Castle', icon: '🏰', cost: 1000 },
-  { id: 'dragon', name: 'Dragon', icon: '🐉', cost: 5000 },
-  { id: 'rocket', name: 'Rocket', icon: '🚀', cost: 10000 },
-  { id: 'planet', name: 'Planet', icon: '🪐', cost: 20000 },
-  { id: 'yacht', name: 'Luxury Yacht', icon: '🛥️', cost: 5000 },
-  { id: 'plane', name: 'Private Jet', icon: '✈️', cost: 8000 },
-  { id: 'lion', name: 'Golden Lion', icon: '🦁', cost: 15000 },
-  { id: 'phoenix', name: 'Phoenix', icon: '🦅', cost: 25000 },
-  { id: 'ring', name: 'Diamond Ring', icon: '💍', cost: 2000 },
-  { id: 'trophy', name: 'Gold Trophy', icon: '🏆', cost: 3000 },
-  { id: 'island', name: 'Private Island', icon: '🏝️', cost: 50000 },
-  { id: 'universe', name: 'Universe', icon: '🌌', cost: 100000 },
-  { id: 'koenigsegg', name: 'Koenigsegg', icon: '🏎️', cost: 75000 },
+  // Static Gifts
+  { id: 'rose', name: 'Rose', icon: '🌹', cost: 1, type: 'static' },
+  { id: 'heart', name: 'Heart', icon: '❤️', cost: 5, type: 'static' },
+  { id: 'chocolate', name: 'Chocolate', icon: '🍫', cost: 10, type: 'static' },
+  { id: 'star', name: 'Star', icon: '⭐', cost: 20, type: 'static' },
+  { id: 'diamond', name: 'Diamond', icon: '💎', cost: 50, type: 'static' },
+  { id: 'crown', name: 'Crown', icon: '👑', cost: 100, type: 'static' },
+  
+  // Animated Gifts (Simulated with icons + CSS classes)
+  { id: 'car', name: 'Sports Car', icon: '🏎️', cost: 500, type: 'animated', animationClass: 'animate-slide-across' },
+  { id: 'rocket', name: 'Rocket', icon: '🚀', cost: 1000, type: 'animated', animationClass: 'animate-fly-up' },
+  { id: 'dragon', name: 'Dragon', icon: '🐉', cost: 5000, type: 'animated', animationClass: 'animate-dragon-breath' },
+  { id: 'planet', name: 'Planet', icon: '🪐', cost: 2000, type: 'animated', animationClass: 'animate-spin-slow' },
+  { id: 'lion', name: 'Golden Lion', icon: '🦁', cost: 3000, type: 'animated', animationClass: 'animate-bounce-in' },
+  { id: 'phoenix', name: 'Phoenix', icon: '🦅', cost: 4000, type: 'animated', animationClass: 'animate-pulse-fast' },
+  { id: 'volcano', name: 'Volcano', icon: '🌋', cost: 6000, type: 'animated', animationClass: 'animate-shake' },
+  { id: 'ufo', name: 'UFO', icon: '🛸', cost: 8000, type: 'animated', animationClass: 'animate-float-random' },
 ];
 
 export const STORE_ITEMS: StoreItem[] = [

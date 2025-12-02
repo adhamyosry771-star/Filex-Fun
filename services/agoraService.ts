@@ -45,9 +45,13 @@ export const initializeAgora = async () => {
             if (!client) return;
             await client.subscribe(user, mediaType);
             if (mediaType === "audio") {
-                user.audioTrack?.play();
-                // Apply global room mute setting immediately
-                user.audioTrack?.setVolume(isRoomAudioMuted ? 0 : 100);
+                // Play audio and handle potential autoplay blocks
+                const audioTrack = user.audioTrack;
+                if (audioTrack) {
+                    audioTrack.play();
+                    // Apply global room mute setting immediately
+                    audioTrack.setVolume(isRoomAudioMuted ? 0 : 100);
+                }
             }
         } catch (e) {
             log("Auto-Subscribe failed", e);
@@ -105,11 +109,18 @@ export const joinVoiceChannel = (channelName: string, uid: string | number) => {
     return connectionQueue;
 };
 
-// 2. Switch Mic State (OPTIMIZED FOR QUALITY)
+// 2. Switch Mic State (OPTIMIZED FOR QUALITY & RELIABILITY)
 export const switchMicrophoneState = async (shouldPublish: boolean, muted: boolean = false) => {
-    if (!client || isMicSwitching) return;
+    // CRITICAL FIX: Wait for any pending join operations to complete before manipulating mic
+    // This ensures we don't try to publish while 'CONNECTING', which causes silent failures.
+    await connectionQueue;
+
+    if (!client) return;
     
+    // Prevent overlapping calls
+    if (isMicSwitching) return;
     isMicSwitching = true;
+
     try {
         if (shouldPublish) {
             // --- START TALKING ---
@@ -142,6 +153,7 @@ export const switchMicrophoneState = async (shouldPublish: boolean, muted: boole
             }
 
             // 2. Local Mute (Instant feedback)
+            // Ensure enabled before publishing
             await localAudioTrack.setEnabled(!muted);
 
             // 3. Publish (Network op)
@@ -152,12 +164,21 @@ export const switchMicrophoneState = async (shouldPublish: boolean, muted: boole
                     await client.publish([localAudioTrack]);
                     log('✅ Mic Published');
                 }
+            } else {
+                console.warn("⚠️ Cannot publish mic: Client not connected to room.");
             }
         } else {
             // --- STOP TALKING ---
             if (localAudioTrack) {
+                // Mute first to be instant
+                await localAudioTrack.setEnabled(false);
+
                 if (client.connectionState === 'CONNECTED') {
-                    await client.unpublish([localAudioTrack]).catch(e => log('Unpublish warn', e));
+                    try {
+                        await client.unpublish([localAudioTrack]);
+                    } catch(e) {
+                        log('Unpublish warn', e);
+                    }
                 }
                 
                 localAudioTrack.stop();

@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { Home, Trophy, User as UserIcon, Users, PlusCircle, Copy, MessageSquare, Loader2, ChevronRight, Crown, ShoppingBag, Wallet as WalletIcon, Settings, Gem, Coins, Edit3, Zap, X, Trash2, Shield, Info, Smartphone, Star, Gamepad2, BadgeCheck, Database } from 'lucide-react';
 import HomeView from './components/HomeView';
@@ -40,12 +41,10 @@ const App: React.FC = () => {
 
   const [activeChat, setActiveChat] = useState<PrivateChatSummary | null>(null);
   
-  // Badge States
   const [unreadChatsCount, setUnreadChatsCount] = useState(0);
   const [unreadNotifsCount, setUnreadNotifsCount] = useState(0);
   const [unreadRequestsCount, setUnreadRequestsCount] = useState(0);
   
-  // Total Badge Calculation
   const totalUnread = unreadChatsCount + unreadNotifsCount + unreadRequestsCount;
 
   useEffect(() => {
@@ -62,7 +61,6 @@ const App: React.FC = () => {
     const authUnsubscribe = onAuthStateChanged(auth, async (user) => {
       setIsLoading(true);
       
-      // Cleanup previous listeners
       if (profileUnsubscribe) { profileUnsubscribe(); profileUnsubscribe = null; }
       if (chatsUnsubscribe) { chatsUnsubscribe(); chatsUnsubscribe = null; }
       if (notifsUnsubscribe) { notifsUnsubscribe(); notifsUnsubscribe = null; }
@@ -71,7 +69,6 @@ const App: React.FC = () => {
       if (user) {
         setAuthUser(user);
         
-        // Listen Profile
         profileUnsubscribe = listenToUserProfile(user.uid, async (profile) => {
             if (profile) {
                  if (profile.isBanned) {
@@ -100,18 +97,15 @@ const App: React.FC = () => {
             setIsLoading(false);
         });
 
-        // 1. Listen Chats Unread
         chatsUnsubscribe = listenToChatList(user.uid, (chats) => {
             const count = chats.reduce((acc, chat) => acc + (chat.unreadCount || 0), 0);
             setUnreadChatsCount(count);
         });
 
-        // 2. Listen System Notifications Unread
         notifsUnsubscribe = listenToUnreadNotifications(user.uid, (count) => {
             setUnreadNotifsCount(count);
         });
 
-        // 3. Listen Friend Requests
         requestsUnsubscribe = listenToFriendRequests(user.uid, (reqs) => {
             setUnreadRequestsCount(reqs.length);
         });
@@ -173,7 +167,6 @@ const App: React.FC = () => {
                  await updateUserProfile(authUser.uid, { avatar: newUrl });
              }
           } catch (e: any) {
-             // console.error("Update avatar error:", e.message || "Unknown");
           }
       }
   };
@@ -185,9 +178,12 @@ const App: React.FC = () => {
   };
 
   const handleJoinRoom = async (room: Room) => {
-    if (userProfile && room.bannedUsers && room.bannedUsers.includes(userProfile.uid!)) {
-        alert(language === 'ar' ? 'أنت محظور من دخول هذه الغرفة' : 'You are banned from entering this room');
-        return;
+    if (userProfile && userProfile.uid && room.bannedUsers && room.bannedUsers[userProfile.uid]) {
+        const expiry = room.bannedUsers[userProfile.uid];
+        if (expiry === -1 || expiry > Date.now()) {
+            alert(language === 'ar' ? 'لقد تم طردك من الغرفة' : 'You are banned from entering this room');
+            return;
+        }
     }
     setActiveRoom(room);
     setMinimizedRoom(null); 
@@ -198,10 +194,7 @@ const App: React.FC = () => {
   const handleRoomAction = async (action: 'minimize' | 'leave' | 'chat', data?: any) => {
       if (action === 'chat' && data) {
           await handleStartPrivateChat(data);
-          // Don't nullify activeRoom, just minimize it implicitly by changing view
           setMinimizedRoom(activeRoom); 
-          // Do NOT setActiveRoom(null) here, kept active in background
-          // But UI logic below handles visibility
       } else if (action === 'minimize') {
           setMinimizedRoom(activeRoom);
           setCurrentView(ViewState.HOME);
@@ -229,12 +222,10 @@ const App: React.FC = () => {
   };
 
   const handleMaximizeRoom = () => {
-      // If we have an active room in background (minimized implicitly or explicitly)
       if (activeRoom) {
           setMinimizedRoom(null);
           setCurrentView(ViewState.ROOM);
       } else if (minimizedRoom) {
-          // Legacy check if needed
           setActiveRoom(minimizedRoom);
           setMinimizedRoom(null);
           setCurrentView(ViewState.ROOM);
@@ -322,7 +313,6 @@ const App: React.FC = () => {
 
   const getIconByLevel = (level: number, type: 'wealth' | 'charm') => {
       const icons = type === 'wealth' ? LEVEL_ICONS : CHARM_ICONS;
-      // Find icon for current level range (e.g. 10-19 uses index for 10)
       const iconObj = [...icons].reverse().find(i => level >= i.min);
       return iconObj || icons[0];
   };
@@ -332,9 +322,8 @@ const App: React.FC = () => {
       case ViewState.HOME:
         return <HomeView rooms={rooms} onJoinRoom={handleJoinRoom} language={language} userProfile={userProfile} onSearch={() => setCurrentView(ViewState.SEARCH)} />;
       
-      // Note: RoomView is handled outside switch to persist state
       case ViewState.ROOM:
-        return null; // Rendered in main wrapper
+        return null;
       
       case ViewState.SEARCH:
         return userProfile ? <SearchView language={language} onBack={() => setCurrentView(ViewState.HOME)} currentUser={userProfile} /> : <div />;
@@ -626,7 +615,6 @@ const App: React.FC = () => {
   return (
     <div dir={language === 'ar' ? 'rtl' : 'ltr'} className={`w-full h-[100dvh] bg-gray-900 overflow-hidden flex flex-col font-sans relative`}>
       <main className="flex-1 overflow-hidden relative z-10">
-        {/* ROOM VIEW is PERSISTENT now to keep audio alive. It's just hidden via CSS when not active. */}
         {activeRoom && (
             <div className={`absolute inset-0 w-full h-full z-20 ${currentView === ViewState.ROOM ? 'block' : 'hidden'}`}>
                 <RoomView 
@@ -638,12 +626,10 @@ const App: React.FC = () => {
             </div>
         )}
         
-        {/* Only render other views if we are NOT in full Room View mode */}
         <div className={`w-full h-full ${currentView === ViewState.ROOM ? 'hidden' : 'block'}`}>
             {renderContent()}
         </div>
 
-        {/* Mini Player appears if we have an active room but we are NOT looking at it */}
         {((activeRoom && currentView !== ViewState.ROOM) || (minimizedRoom && !activeRoom)) && (
             <MiniRoomPlayer 
                 room={activeRoom || minimizedRoom!} 

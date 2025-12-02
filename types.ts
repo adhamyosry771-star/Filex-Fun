@@ -148,7 +148,7 @@ export interface Room {
   isActivities?: boolean; // New field for Activities Badge
   contributors?: Record<string, Contributor>;
   cupStartTime?: number; // Timestamp when the current cup started
-  bannedUsers?: string[]; // Array of User IDs (UIDs) banned from this room
+  bannedUsers?: Record<string, number>; // Map of UserUID -> ExpirationTimestamp (-1 for permanent)
   admins?: string[]; // Array of User IDs (UIDs) who are room admins
 }
 

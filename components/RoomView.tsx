@@ -1,5 +1,6 @@
+
 import React, { useState, useEffect, useRef } from 'react';
-import { ArrowLeft, Send, Heart, Share2, Gift as GiftIcon, Users, Crown, Mic, MicOff, Lock, Unlock, Settings, Image as ImageIcon, X, Info, Minimize2, LogOut, BadgeCheck, Loader2, Upload, Shield, Trophy, Bot, Volume2, VolumeX, ArrowDownCircle, Ban, Trash2, UserCog, UserMinus, Zap, BarChart3, Gamepad2 } from 'lucide-react';
+import { ArrowLeft, Send, Heart, Share2, Gift as GiftIcon, Users, Crown, Mic, MicOff, Lock, Unlock, Settings, Image as ImageIcon, X, Info, Minimize2, LogOut, BadgeCheck, Loader2, Upload, Shield, Trophy, Bot, Volume2, VolumeX, ArrowDownCircle, Ban, Trash2, UserCog, UserMinus, Zap, BarChart3, Gamepad2, Clock } from 'lucide-react';
 import { Room, ChatMessage, Gift, Language, User, RoomSeat } from '../types';
 import { GIFTS, STORE_ITEMS, ROOM_BACKGROUNDS, VIP_TIERS, ADMIN_ROLES } from '../constants';
 import { listenToMessages, sendMessage, takeSeat, leaveSeat, updateRoomDetails, sendGiftTransaction, toggleSeatLock, toggleSeatMute, decrementViewerCount, listenToRoom, kickUserFromSeat, banUserFromRoom, unbanUserFromRoom, removeRoomAdmin, addRoomAdmin, searchUserByDisplayId, enterRoom, exitRoom, listenToRoomViewers } from '../services/firebaseService';
@@ -41,7 +42,7 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
   const [showLeaderboard, setShowLeaderboard] = useState(false);
   
   const [selectedUser, setSelectedUser] = useState<RoomSeat | null>(null);
-  const [fullProfileUser, setFullProfileUser] = useState<User | null>(null); // For Full Profile View
+  const [fullProfileUser, setFullProfileUser] = useState<User | null>(null);
 
   const [seatToConfirm, setSeatToConfirm] = useState<number | null>(null);
   const [loadingSeatIndex, setLoadingSeatIndex] = useState<number | null>(null);
@@ -56,6 +57,10 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
   const [settingsTab, setSettingsTab] = useState<'info' | 'background' | 'banned' | 'admins'>('info');
   const [bgType, setBgType] = useState<'inner' | 'outer'>('inner');
 
+  // Ban Duration Modal State
+  const [showBanDurationModal, setShowBanDurationModal] = useState(false);
+  const [userToBan, setUserToBan] = useState<string | null>(null);
+
   // New: Active Viewer List State
   const [viewers, setViewers] = useState<User[]>([]);
   const viewersRef = useRef<User[]>([]);
@@ -64,7 +69,6 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   
-  // Track join time to hide history
   const joinTimestamp = useRef(Date.now());
   const hasSentJoinMsg = useRef(false);
 
@@ -75,17 +79,15 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
   useEffect(() => { currentUserRef.current = currentUser; }, [currentUser]);
 
   const isHost = room.hostId === currentUser.id;
-  // Use UID for admin checks
   const isRoomAdmin = room.admins?.includes(currentUser.uid!);
   const canManageRoom = isHost || isRoomAdmin;
 
-  // --- SEAT LOGIC: Ensure 11 Seats (1 Host + 10 Guests) ---
   const seats: RoomSeat[] = Array(11).fill(null).map((_, i) => {
       return (room.seats && room.seats[i]) ? room.seats[i] : { 
           index: i, 
           userId: null, 
           userName: null, 
-          userAvatar: null,
+          userAvatar: null, 
           isMuted: false, 
           isLocked: false, 
           giftCount: 0,
@@ -96,36 +98,27 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
 
   const mySeat = seats.find(s => s.userId === currentUser.id);
   
-  // Track if seated for cleanup
   const isSeatedRef = useRef(false);
   useEffect(() => {
       isSeatedRef.current = !!mySeat;
   }, [mySeat]);
 
-  // Calculate active speakers dynamically
   const activeSeats = seats.filter(s => s.userId);
 
-  // --- UNMOUNT CLEANUP ---
   useEffect(() => {
-      // Setup Agora on Mount
       const uid = currentUser.uid || currentUser.id;
       if (uid) {
           joinVoiceChannel(room.id, uid);
       }
 
-      // Enter Room (Add to Viewers list)
       if (currentUser.uid) {
           enterRoom(room.id, currentUser);
       }
 
       return () => {
-          // IMPORTANT: We do NOT leave voice channel or exit room on simple unmount
-          // because we want background audio and minimized state.
-          // Explicit leave is handled by handleLeaveRoomAction
       };
   }, [room.id]);
 
-  // --- LISTEN TO ROOM VIEWERS ---
   useEffect(() => {
       const unsub = listenToRoomViewers(room.id, (v) => {
           setViewers(v);
@@ -134,27 +127,22 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
       return () => unsub();
   }, [room.id]);
 
-  // --- LISTEN TO VOLUME INDICATOR ---
   useEffect(() => {
       listenToVolume((volumes) => {
           const speaking = new Set<string>();
           volumes.forEach(v => {
-              if (v.level > 5) { // Sensitivity threshold
+              if (v.level > 5) {
                   let authUid = String(v.uid);
-                  // 0 is local user
                   if (v.uid === 0 && currentUserRef.current.uid) {
                       authUid = currentUserRef.current.uid;
                   }
                   
-                  // Map Auth UID -> Display ID (seat.userId)
                   const viewer = viewersRef.current.find(u => u.uid === authUid);
                   if (viewer) {
                       speaking.add(viewer.id);
                   } else if (authUid === currentUserRef.current.uid) {
-                      // Fallback for self
                       speaking.add(currentUserRef.current.id);
                   } else {
-                      // Just in case Display ID was used as UID (unlikely but safe)
                       speaking.add(authUid);
                   }
               }
@@ -164,7 +152,6 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
       return () => listenToVolume(() => {});
   }, []);
 
-  // --- SEND JOIN MESSAGE ON MOUNT ---
   useEffect(() => {
       if (hasSentJoinMsg.current || !room.id || !currentUser.uid) return;
       hasSentJoinMsg.current = true;
@@ -190,7 +177,6 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
       sendJoin();
   }, [room.id, currentUser.uid]);
 
-  // --- LISTEN TO ROOM UPDATES ---
   useEffect(() => {
       const unsubscribe = listenToRoom(initialRoom.id, (updatedRoom) => {
           if (updatedRoom) {
@@ -215,16 +201,7 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
                       return serverSeat;
                   });
 
-                  let currentBanned = updatedRoom.bannedUsers || [];
-                  pendingBannedUsers.current.forEach(uid => {
-                      if (!currentBanned.includes(uid)) {
-                          currentBanned = [...currentBanned, uid];
-                      } else {
-                          pendingBannedUsers.current.delete(uid);
-                      }
-                  });
-
-                  return { ...updatedRoom, seats: newSeats, bannedUsers: currentBanned };
+                  return { ...updatedRoom, seats: newSeats };
               });
 
               if (!showRoomSettings) {
@@ -233,8 +210,14 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
                   setIsAiEnabled(updatedRoom.isAiHost || false);
               }
 
-              if (updatedRoom.bannedUsers && updatedRoom.bannedUsers.includes(currentUser.uid!)) {
-                  onAction('leave');
+              // Check if I am banned
+              const myUid = currentUser.uid!;
+              if (updatedRoom.bannedUsers && updatedRoom.bannedUsers[myUid]) {
+                  const expiry = updatedRoom.bannedUsers[myUid];
+                  if (expiry === -1 || expiry > Date.now()) {
+                      alert(language === 'ar' ? 'لقد تم طردك من الغرفة' : 'You have been kicked/banned from the room');
+                      onAction('leave');
+                  }
               }
 
           } else {
@@ -261,30 +244,25 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
       }
   }, [amISeated, mySeatMuted, loadingSeatIndex]);
 
-  // --- LISTEN TO MESSAGES & ANIMATIONS ---
   useEffect(() => {
      if (!room || !room.id) return;
      joinTimestamp.current = Date.now();
 
      const unsubscribe = listenToMessages(room.id, (realTimeMsgs) => {
-         // Filter messages for display (excluding Join messages from main chat list)
          const displayMessages = realTimeMsgs.filter(msg => 
              msg.timestamp >= joinTimestamp.current && !msg.isJoin
          );
          setMessages(displayMessages);
 
-         // Handle Join Notifications & Animations (from raw stream)
          const latestMsg = realTimeMsgs[realTimeMsgs.length - 1];
          const now = Date.now();
 
          if (latestMsg && (now - latestMsg.timestamp < 3000)) {
-             // Join Notification Logic
              if (latestMsg.isJoin && (!joinNotification || joinNotification.id !== latestMsg.id)) {
                  setJoinNotification({ name: latestMsg.userName, id: latestMsg.id });
                  setTimeout(() => setJoinNotification(null), 3000);
              }
 
-             // Animation Logic
              if (latestMsg.isGift && latestMsg.giftType === 'animated' && latestMsg.giftIcon) {
                  triggerAnimation(latestMsg.giftIcon, latestMsg.text.includes('Rocket') ? 'animate-fly-up' : 'animate-bounce-in');
              }
@@ -383,7 +361,13 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
       animated: { ar: 'متحركة', en: 'Animated' },
       selectGift: { ar: 'اختر هدية', en: 'Select Gift' },
       welcome: { ar: 'مرحبا ب', en: 'Welcome' },
-      entered: { ar: 'لقد دخل الغرفة', en: 'has entered the room' }
+      entered: { ar: 'لقد دخل الغرفة', en: 'has entered the room' },
+      banDuration: { ar: 'مدة الطرد', en: 'Ban Duration' },
+      hour: { ar: 'ساعة', en: 'Hour' },
+      day: { ar: 'يوم', en: 'Day' },
+      week: { ar: 'اسبوع', en: 'Week' },
+      permanent: { ar: 'دائم', en: 'Permanent' },
+      confirmBan: { ar: 'تأكيد الطرد', en: 'Confirm Ban' }
     };
     return dict[key]?.[language] || key;
   };
@@ -536,7 +520,6 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
               if (isSeatedRef.current && currentUserRef.current) {
                   await leaveSeat(room.id, currentUserRef.current);
               }
-              // Remove user from viewers list
               if (currentUserRef.current.uid) {
                   await exitRoom(room.id, currentUserRef.current.uid);
               }
@@ -604,14 +587,36 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
       setSelectedUser(null);
   };
 
-  const handleBanUser = (userId: string) => {
+  // Triggered when user clicks "Ban" on profile modal
+  const handleBanRequest = (userId: string) => {
       if (userId === currentUser.id) return;
-      pendingBannedUsers.current.add(userId);
-      const targetSeat = seats.find(s => s.userId === userId);
-      if (targetSeat) handleKickSeat(targetSeat.index);
-      setRoom(prev => ({ ...prev, bannedUsers: [...(prev.bannedUsers || []), userId] }));
-      banUserFromRoom(room.id, userId);
+      // Resolve UID from displayId if needed, assume userToBan uses UID
+      // For simplicity in this logic, we pass DisplayID but in real scenario we need UID.
+      // Assuming userId passed here is UID because selectedUser logic tries to resolve it.
+      setUserToBan(userId);
       setSelectedUser(null);
+      setShowBanDurationModal(true);
+  };
+
+  const executeBan = async (durationInMinutes: number) => {
+      if (!userToBan) return;
+      const uid = userToBan;
+      pendingBannedUsers.current.add(uid);
+      
+      // Remove from seat if seated
+      const targetSeat = seats.find(s => s.userId === uid || (s as any).uid === uid);
+      if (targetSeat) handleKickSeat(targetSeat.index);
+
+      // Optimistic update
+      const expiry = durationInMinutes === -1 ? -1 : Date.now() + (durationInMinutes * 60 * 1000);
+      setRoom(prev => ({ 
+          ...prev, 
+          bannedUsers: { ...prev.bannedUsers, [uid]: expiry }
+      }));
+
+      await banUserFromRoom(room.id, uid, durationInMinutes);
+      setShowBanDurationModal(false);
+      setUserToBan(null);
   };
 
   const handleUnbanUser = async (userId: string) => await unbanUserFromRoom(room.id, userId);
@@ -636,40 +641,26 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
 
   const filteredGifts = GIFTS.filter(g => g.type === giftTab);
 
-  // Helper to click user in Viewer List
   const handleViewerClick = (user: User) => {
-      // Create a temporary seat-like object for the modal
       const tempUser: any = {
           userId: user.id,
           userName: user.name,
           userAvatar: user.avatar,
-          ...user // spread full user props if available
+          ...user
       };
       setSelectedUser(tempUser);
   };
 
-  // Logic to determine if "Make Admin" or "Remove Admin" should be shown
   const selectedUserId = selectedUser?.userId;
-  // NOTE: room.admins stores UIDs usually, while selectedUser.userId is Display ID.
-  // We need to match correctly. However, for now, let's assume selectedUser has UID if coming from viewers list,
-  // or we need to look it up.
-  // Ideally, room.admins stores UIDs. selectedUser (RoomSeat) stores DisplayID in .userId property.
-  // We need the UID of selectedUser to check admin status.
-  // BUT: The existing addRoomAdmin stores userId (DisplayID or UID depending on implementation).
-  // Let's rely on checking if the ID exists in the array.
-  // We will pass logic into UserProfileModal to check admin status.
 
   return (
-    // DVH Fix for Mobile Browsers: Use h-[100dvh] instead of h-screen
     <div className="relative h-[100dvh] w-full bg-black flex flex-col overflow-hidden">
       
-      {/* 1. BACKGROUND */}
       <div className="absolute inset-0 z-0">
         <img src={room.backgroundImage || room.thumbnail} className="w-full h-full object-cover transition-opacity duration-700" />
         <div className="absolute inset-0 bg-gradient-to-b from-black/60 via-black/20 to-black/90"></div>
       </div>
 
-      {/* ANIMATION OVERLAY */}
       {activeAnimations.map(anim => (
           <div key={anim.id} className="absolute inset-0 z-[100] flex items-center justify-center pointer-events-none">
               <div className={`text-9xl filter drop-shadow-[0_0_30px_rgba(255,255,255,0.8)] ${anim.class}`}>
@@ -678,7 +669,6 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
           </div>
       ))}
 
-      {/* 2. HEADER */}
       <div className="relative z-50 pt-safe-top px-3 pb-2 flex items-center justify-between gap-2 bg-gradient-to-b from-black/80 to-transparent w-full shrink-0 h-[60px]">
         <div className="flex items-center gap-2 min-w-0 flex-1">
             <button onClick={() => setShowExitModal(true)} className="shrink-0 p-2 bg-white/10 rounded-full hover:bg-white/20 backdrop-blur border border-white/5">
@@ -701,7 +691,6 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
         </div>
       </div>
 
-      {/* Moved Cup Button - Positioned absolutely under the back arrow */}
       <button 
         onClick={() => setShowLeaderboard(true)} 
         className="absolute top-[65px] z-40 rtl:right-3 ltr:left-3 bg-yellow-500/20 backdrop-blur px-2 py-1.5 rounded-full text-[10px] font-black text-yellow-400 border border-yellow-500/50 flex gap-1 shadow-lg"
@@ -709,9 +698,7 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
         <Trophy className="w-3 h-3"/> {t('cup')}
       </button>
 
-      {/* 3. MIC GRID - Shrink 0 to prevent collapse */}
       <div className="relative z-10 w-full px-2 pt-2 pb-2 shrink-0 flex flex-col items-center">
-          {/* Host (Index 0) */}
           <div className="flex justify-center mb-4 shrink-0">
              {seats.slice(0, 1).map((seat) => {
                  const isSpeaking = seat.userId && speakingUsers.has(seat.userId);
@@ -729,7 +716,6 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
              })}
           </div>
           
-          {/* Guests (Indices 1-10) - 2 Rows of 5 */}
           <div className="grid grid-cols-5 gap-y-4 gap-x-2 justify-items-center w-full max-w-md shrink-0">
              {seats.slice(1).map((seat) => {
                  const isSpeaking = seat.userId && speakingUsers.has(seat.userId);
@@ -747,7 +733,6 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
              })}
           </div>
 
-          {/* ACTIVE SPEAKERS BAR */}
           <div className="mt-3 w-full max-w-sm p-2 bg-white/5 backdrop-blur-md border border-white/10 rounded-2xl flex items-center justify-between shadow-lg animate-in fade-in slide-in-from-bottom-2 shrink-0">
               <div className="flex items-center gap-2">
                  <div className="p-1.5 bg-brand-500/20 rounded-full text-brand-400 border border-brand-500/30">
@@ -771,7 +756,6 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
           </div>
       </div>
 
-      {/* 4. CHAT AREA - Flex Grow to fill remaining space properly */}
       <div className="relative z-20 flex-1 flex flex-col min-h-0 bg-gradient-to-t from-black via-black/80 to-transparent w-full">
           <div className="px-4 py-3 mx-4 mt-2 bg-brand-900/60 backdrop-blur border-l-4 border-brand-500 rounded-r-lg mb-2 shadow-sm animate-in fade-in flex flex-col gap-1 shrink-0">
               <div className="flex items-start gap-2 border-b border-white/10 pb-2 mb-1">
@@ -816,7 +800,6 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
                               <div className="flex items-center gap-1 mb-0.5 px-1 flex-wrap">
                                    {(msg.vipLevel || 0) > 0 && <span className="bg-gradient-to-r from-gold-400 to-orange-500 text-black text-[8px] font-black px-1 rounded">V{msg.vipLevel}</span>}
                                    
-                                   {/* DYNAMIC ADMIN BADGE RENDERING */}
                                    {msg.adminRole && ADMIN_ROLES[msg.adminRole] && (
                                        <span className={`text-[8px] px-1.5 py-0.5 rounded border flex items-center gap-0.5 ${ADMIN_ROLES[msg.adminRole].class}`}>
                                            <Shield className="w-2 h-2" /> 
@@ -832,7 +815,6 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
                   );
               })}
               
-              {/* JOIN NOTIFICATION BANNER */}
               {joinNotification && (
                   <div className="sticky bottom-2 left-0 right-0 flex justify-center z-50 animate-in slide-in-from-bottom-5 fade-in duration-300">
                       <div className="bg-black/60 backdrop-blur-md border border-white/10 px-4 py-1.5 rounded-full shadow-xl flex items-center gap-2">
@@ -859,11 +841,9 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
           </div>
       </div>
 
-      {/* GIFT PANEL */}
       {showGiftPanel && (
           <div className="absolute inset-0 z-50 flex flex-col justify-end bg-black/50 backdrop-blur-sm animate-in slide-in-from-bottom-10">
               <div className="bg-gray-900 border-t border-gray-700 rounded-t-3xl p-4 shadow-2xl h-[50vh] flex flex-col">
-                  {/* Header & Tabs */}
                   <div className="flex justify-between items-center mb-2">
                       <div className="flex gap-2">
                           <button onClick={() => setGiftTab('static')} className={`px-4 py-1.5 rounded-full text-xs font-bold transition ${giftTab === 'static' ? 'bg-white text-black' : 'bg-gray-800 text-gray-400'}`}>{t('static')}</button>
@@ -873,7 +853,6 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
                       <button onClick={() => setShowGiftPanel(false)}><X className="w-5 h-5 text-gray-500" /></button>
                   </div>
 
-                  {/* Gift Grid */}
                   <div className="flex-1 overflow-y-auto grid grid-cols-4 gap-3 pb-2 content-start">
                       {filteredGifts.map(gift => (
                           <button 
@@ -893,7 +872,6 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
                       ))}
                   </div>
 
-                  {/* Footer Send Action */}
                   <div className="pt-3 border-t border-white/5 flex gap-3 items-center">
                       <div className="flex items-center gap-2 bg-black/40 rounded-full px-3 py-2 border border-white/10 flex-1">
                           <span className="text-gray-400 text-xs whitespace-nowrap">{t('sendTo')}</span>
@@ -917,26 +895,12 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
       )}
 
       {selectedUser && (() => {
-          // --- ADMIN LOGIC CALCULATION ---
-          // Use 'id' (Display ID) or 'uid' (Firebase Auth ID) carefully.
-          // room.admins stores UIDs. We need the UID of the selected user.
-          // If selectedUser is from `viewers` list, it has `uid`.
-          // If selectedUser is from `seats`, it might only have `userId` (Display ID).
-          // However, in this implementation, assume `userId` on seat serves as primary key or we map it.
-          // Better approach: Check both or rely on the fact that viewer list provides full user object.
-          
           const targetId = selectedUser.userId || (selectedUser as any).id;
-          // Ideally check against UID if available, else assume userId matches stored admin IDs
           const targetUid = (selectedUser as any).uid || targetId; 
           
           const isTargetAdmin = room.admins?.includes(targetUid);
           const isTargetHost = targetId === room.hostId;
           const isTargetMe = targetId === currentUser.id;
-
-          // Logic:
-          // Make Admin: Only Host can do it. Target must NOT be admin already.
-          // Remove Admin: Only Host can do it. Target MUST be admin.
-          // Kick/Ban: Host can do it to anyone (except self). Admin can do it to anyone EXCEPT Host and other Admins.
 
           const canBanTarget = (isHost && !isTargetMe) || (isRoomAdmin && !isTargetHost && !isTargetAdmin && !isTargetMe);
 
@@ -957,14 +921,10 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
                       setSelectedUser(null);
                       setShowGiftPanel(true);
                   }}
-                  // Kick/Ban Logic: Host or Admin can kick/ban, but Admins cannot kick/ban other Admins/Host
                   onKickSeat={canBanTarget && selectedUser.userId ? () => handleKickSeat(selectedUser.index) : undefined}
-                  onBanUser={canBanTarget && selectedUser.userId ? () => handleBanUser(selectedUser.userId!) : undefined}
-                  
-                  // Admin Management Logic: Only Host
+                  onBanUser={canBanTarget && selectedUser.userId ? () => handleBanRequest(selectedUser.userId!) : undefined}
                   onMakeAdmin={isHost && !isTargetAdmin && !isTargetMe ? () => handleMakeAdmin(targetUid) : undefined}
                   onRemoveAdmin={isHost && isTargetAdmin && !isTargetMe ? () => handleRemoveAdmin(targetUid) : undefined}
-                  
                   onOpenFullProfile={(user) => {
                       setFullProfileUser(user);
                       setSelectedUser(null);
@@ -972,6 +932,24 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
               />
           );
       })()}
+
+      {/* BAN DURATION MODAL */}
+      {showBanDurationModal && (
+          <div className="absolute inset-0 z-[70] flex items-center justify-center bg-black/90 backdrop-blur-sm p-4 animate-in zoom-in-95">
+              <div className="bg-gray-900 border border-red-500 rounded-2xl w-full max-w-xs p-5 shadow-2xl">
+                  <h3 className="text-red-500 font-bold mb-4 flex items-center gap-2">
+                      <Ban className="w-5 h-5"/> {t('banDuration')}
+                  </h3>
+                  <div className="space-y-2 mb-6">
+                      <button onClick={() => executeBan(60)} className="w-full bg-gray-800 hover:bg-gray-700 text-white py-3 rounded-xl font-bold border border-gray-700">1 {t('hour')}</button>
+                      <button onClick={() => executeBan(1440)} className="w-full bg-gray-800 hover:bg-gray-700 text-white py-3 rounded-xl font-bold border border-gray-700">24 {t('hours') || t('day')}</button>
+                      <button onClick={() => executeBan(10080)} className="w-full bg-gray-800 hover:bg-gray-700 text-white py-3 rounded-xl font-bold border border-gray-700">7 {t('days') || t('week')}</button>
+                      <button onClick={() => executeBan(-1)} className="w-full bg-red-900/30 hover:bg-red-900/50 text-red-400 py-3 rounded-xl font-bold border border-red-900/50">{t('permanent')}</button>
+                  </div>
+                  <button onClick={() => setShowBanDurationModal(false)} className="w-full text-gray-500 text-sm">{t('cancel')}</button>
+              </div>
+          </div>
+      )}
 
       {fullProfileUser && (
           <FullProfileView 
@@ -1026,11 +1004,9 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
           </div>
       )}
 
-      {/* Settings & Exit Modals (unchanged structure) */}
       {showRoomSettings && canManageRoom && (
           <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in">
               <div className="w-full max-w-sm bg-gray-900 border border-gray-700 rounded-2xl flex flex-col shadow-2xl overflow-hidden max-h-[85vh]">
-                  {/* ... settings content ... */}
                   <div className="p-4 border-b border-gray-800 flex justify-between items-center bg-gray-800/50">
                       <h3 className="text-white font-bold">{t('roomSettings')}</h3>
                       <button onClick={() => setShowRoomSettings(false)}><X className="w-5 h-5 text-gray-400" /></button>
@@ -1038,7 +1014,6 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
                   <div className="flex p-2 gap-2 bg-gray-900 border-b border-gray-800 overflow-x-auto scrollbar-hide">
                       <button onClick={() => setSettingsTab('info')} className={`flex-1 py-2 rounded-lg text-xs font-bold transition whitespace-nowrap ${settingsTab === 'info' ? 'bg-brand-600 text-white' : 'text-gray-400 hover:bg-white/5'}`}>{t('general')}</button>
                       <button onClick={() => setSettingsTab('background')} className={`flex-1 py-2 rounded-lg text-xs font-bold transition whitespace-nowrap ${settingsTab === 'background' ? 'bg-brand-600 text-white' : 'text-gray-400 hover:bg-white/5'}`}>{t('backgrounds')}</button>
-                      {/* Host Only Tabs */}
                       {isHost && <button onClick={() => setSettingsTab('banned')} className={`flex-1 py-2 rounded-lg text-xs font-bold transition whitespace-nowrap ${settingsTab === 'banned' ? 'bg-red-600 text-white' : 'text-gray-400 hover:bg-white/5'}`}>{t('banned')}</button>}
                       {isHost && <button onClick={() => setSettingsTab('admins')} className={`flex-1 py-2 rounded-lg text-xs font-bold transition whitespace-nowrap ${settingsTab === 'admins' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:bg-white/5'}`}>{t('admins')}</button>}
                   </div>
@@ -1067,7 +1042,20 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
                       )}
                       {settingsTab === 'banned' && isHost && (
                           <div className="space-y-2">
-                              {!room.bannedUsers || room.bannedUsers.length === 0 ? <div className="text-gray-500 text-center text-xs py-10">No banned users</div> : room.bannedUsers.map(uid => (<div key={uid} className="flex justify-between items-center bg-gray-800 p-2 rounded-lg border border-gray-700"><div className="flex items-center gap-2"><Ban className="w-4 h-4 text-red-500" /><span className="text-white text-xs font-mono">{uid}</span></div><button onClick={() => handleUnbanUser(uid)} className="text-[10px] bg-green-600/20 text-green-400 px-2 py-1 rounded border border-green-600/50">{t('unban')}</button></div>))}
+                              {!room.bannedUsers || Object.keys(room.bannedUsers).length === 0 ? <div className="text-gray-500 text-center text-xs py-10">No banned users</div> : Object.entries(room.bannedUsers).map(([uid, expiry]) => (
+                                  <div key={uid} className="flex justify-between items-center bg-gray-800 p-2 rounded-lg border border-gray-700">
+                                      <div className="flex items-center gap-2">
+                                          <Ban className="w-4 h-4 text-red-500" />
+                                          <div className="flex flex-col">
+                                              <span className="text-white text-xs font-mono">{uid}</span>
+                                              <span className="text-[9px] text-gray-400">
+                                                  {expiry === -1 ? t('permanent') : new Date(expiry as number).toLocaleString()}
+                                              </span>
+                                          </div>
+                                      </div>
+                                      <button onClick={() => handleUnbanUser(uid)} className="text-[10px] bg-green-600/20 text-green-400 px-2 py-1 rounded border border-green-600/50">{t('unban')}</button>
+                                  </div>
+                              ))}
                           </div>
                       )}
                       {settingsTab === 'admins' && isHost && (

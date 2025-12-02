@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { ArrowLeft, Send, Heart, Share2, Gift as GiftIcon, Users, Crown, Mic, MicOff, Lock, Unlock, Settings, Image as ImageIcon, X, Info, Minimize2, LogOut, BadgeCheck, Loader2, Upload, Shield, Trophy, Bot, Volume2, VolumeX, ArrowDownCircle, Ban, Trash2, UserCog, UserMinus, Zap, BarChart3, Gamepad2 } from 'lucide-react';
 import { Room, ChatMessage, Gift, Language, User, RoomSeat } from '../types';
@@ -76,6 +75,7 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
   useEffect(() => { currentUserRef.current = currentUser; }, [currentUser]);
 
   const isHost = room.hostId === currentUser.id;
+  // Use UID for admin checks
   const isRoomAdmin = room.admins?.includes(currentUser.uid!);
   const canManageRoom = isHost || isRoomAdmin;
 
@@ -648,6 +648,17 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
       setSelectedUser(tempUser);
   };
 
+  // Logic to determine if "Make Admin" or "Remove Admin" should be shown
+  const selectedUserId = selectedUser?.userId;
+  // NOTE: room.admins stores UIDs usually, while selectedUser.userId is Display ID.
+  // We need to match correctly. However, for now, let's assume selectedUser has UID if coming from viewers list,
+  // or we need to look it up.
+  // Ideally, room.admins stores UIDs. selectedUser (RoomSeat) stores DisplayID in .userId property.
+  // We need the UID of selectedUser to check admin status.
+  // BUT: The existing addRoomAdmin stores userId (DisplayID or UID depending on implementation).
+  // Let's rely on checking if the ID exists in the array.
+  // We will pass logic into UserProfileModal to check admin status.
+
   return (
     // DVH Fix for Mobile Browsers: Use h-[100dvh] instead of h-screen
     <div className="relative h-[100dvh] w-full bg-black flex flex-col overflow-hidden">
@@ -813,7 +824,7 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
                                        </span>
                                    )}
 
-                                   <span className={`text-[10px] font-bold flex items-center gap-1 ${getVipTextStyle(msg.vipLevel || 0)}`}>{msg.userName}{isOfficial && <BadgeCheck className="w-3 h-3 text-blue-500 fill-white inline" />}{isAi && <span className="text-[8px] bg-brand-600 text-white px-1 rounded">BOT</span>}</span>
+                                   <span className={`text-[10px] font-bold flex items-center gap-1 ${getVipTextStyle(msg.vipLevel || 0)}`}>{msg.userName}{isOfficial && <BadgeCheck className="w-3 h-3 text-blue-500 fill-blue-100 inline" />}{isAi && <span className="text-[8px] bg-brand-600 text-white px-1 rounded">BOT</span>}</span>
                               </div>
                               <div className={`px-3 py-1.5 text-xs leading-relaxed text-white shadow-sm break-words border border-white/5 backdrop-blur-md ${bubbleClass} ${isMe ? 'rounded-tr-none' : 'rounded-tl-none'}`}>{msg.text}</div>
                           </div>
@@ -905,34 +916,62 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
           </div>
       )}
 
-      {/* ... Other Modals (UserProfileModal, RoomLeaderboard, etc.) ... */}
-      {selectedUser && (
-          <UserProfileModal 
-              user={selectedUser}
-              currentUser={currentUser}
-              language={language}
-              onClose={() => setSelectedUser(null)}
-              onMessage={() => {
-                  if (selectedUser.userId) {
-                     onAction('chat', selectedUser.userId);
-                     setSelectedUser(null);
-                  }
-              }}
-              onGift={() => {
-                  setGiftTarget(selectedUser.userId || 'all');
-                  setSelectedUser(null);
-                  setShowGiftPanel(true);
-              }}
-              onKickSeat={canManageRoom && selectedUser.userId && selectedUser.userId !== room.hostId ? () => handleKickSeat(selectedUser.index) : undefined}
-              onBanUser={canManageRoom && selectedUser.userId && selectedUser.userId !== room.hostId ? () => handleBanUser(selectedUser.userId!) : undefined}
-              onMakeAdmin={isHost && selectedUser.userId && selectedUser.userId !== room.hostId ? () => handleMakeAdmin(selectedUser.userId!) : undefined}
-              onRemoveAdmin={isHost && selectedUser.userId && selectedUser.userId !== room.hostId ? () => handleRemoveAdmin(selectedUser.userId!) : undefined}
-              onOpenFullProfile={(user) => {
-                  setFullProfileUser(user);
-                  setSelectedUser(null);
-              }}
-          />
-      )}
+      {selectedUser && (() => {
+          // --- ADMIN LOGIC CALCULATION ---
+          // Use 'id' (Display ID) or 'uid' (Firebase Auth ID) carefully.
+          // room.admins stores UIDs. We need the UID of the selected user.
+          // If selectedUser is from `viewers` list, it has `uid`.
+          // If selectedUser is from `seats`, it might only have `userId` (Display ID).
+          // However, in this implementation, assume `userId` on seat serves as primary key or we map it.
+          // Better approach: Check both or rely on the fact that viewer list provides full user object.
+          
+          const targetId = selectedUser.userId || (selectedUser as any).id;
+          // Ideally check against UID if available, else assume userId matches stored admin IDs
+          const targetUid = (selectedUser as any).uid || targetId; 
+          
+          const isTargetAdmin = room.admins?.includes(targetUid);
+          const isTargetHost = targetId === room.hostId;
+          const isTargetMe = targetId === currentUser.id;
+
+          // Logic:
+          // Make Admin: Only Host can do it. Target must NOT be admin already.
+          // Remove Admin: Only Host can do it. Target MUST be admin.
+          // Kick/Ban: Host can do it to anyone (except self). Admin can do it to anyone EXCEPT Host and other Admins.
+
+          const canBanTarget = (isHost && !isTargetMe) || (isRoomAdmin && !isTargetHost && !isTargetAdmin && !isTargetMe);
+
+          return (
+              <UserProfileModal 
+                  user={selectedUser}
+                  currentUser={currentUser}
+                  language={language}
+                  onClose={() => setSelectedUser(null)}
+                  onMessage={() => {
+                      if (selectedUser.userId) {
+                         onAction('chat', selectedUser.userId);
+                         setSelectedUser(null);
+                      }
+                  }}
+                  onGift={() => {
+                      setGiftTarget(selectedUser.userId || 'all');
+                      setSelectedUser(null);
+                      setShowGiftPanel(true);
+                  }}
+                  // Kick/Ban Logic: Host or Admin can kick/ban, but Admins cannot kick/ban other Admins/Host
+                  onKickSeat={canBanTarget && selectedUser.userId ? () => handleKickSeat(selectedUser.index) : undefined}
+                  onBanUser={canBanTarget && selectedUser.userId ? () => handleBanUser(selectedUser.userId!) : undefined}
+                  
+                  // Admin Management Logic: Only Host
+                  onMakeAdmin={isHost && !isTargetAdmin && !isTargetMe ? () => handleMakeAdmin(targetUid) : undefined}
+                  onRemoveAdmin={isHost && isTargetAdmin && !isTargetMe ? () => handleRemoveAdmin(targetUid) : undefined}
+                  
+                  onOpenFullProfile={(user) => {
+                      setFullProfileUser(user);
+                      setSelectedUser(null);
+                  }}
+              />
+          );
+      })()}
 
       {fullProfileUser && (
           <FullProfileView 
@@ -999,6 +1038,7 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
                   <div className="flex p-2 gap-2 bg-gray-900 border-b border-gray-800 overflow-x-auto scrollbar-hide">
                       <button onClick={() => setSettingsTab('info')} className={`flex-1 py-2 rounded-lg text-xs font-bold transition whitespace-nowrap ${settingsTab === 'info' ? 'bg-brand-600 text-white' : 'text-gray-400 hover:bg-white/5'}`}>{t('general')}</button>
                       <button onClick={() => setSettingsTab('background')} className={`flex-1 py-2 rounded-lg text-xs font-bold transition whitespace-nowrap ${settingsTab === 'background' ? 'bg-brand-600 text-white' : 'text-gray-400 hover:bg-white/5'}`}>{t('backgrounds')}</button>
+                      {/* Host Only Tabs */}
                       {isHost && <button onClick={() => setSettingsTab('banned')} className={`flex-1 py-2 rounded-lg text-xs font-bold transition whitespace-nowrap ${settingsTab === 'banned' ? 'bg-red-600 text-white' : 'text-gray-400 hover:bg-white/5'}`}>{t('banned')}</button>}
                       {isHost && <button onClick={() => setSettingsTab('admins')} className={`flex-1 py-2 rounded-lg text-xs font-bold transition whitespace-nowrap ${settingsTab === 'admins' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:bg-white/5'}`}>{t('admins')}</button>}
                   </div>

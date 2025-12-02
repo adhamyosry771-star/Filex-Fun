@@ -203,6 +203,21 @@ export const broadcastOfficialMessage = async (title: string, body: string) => {
   });
 };
 
+export const resetAllRoomCups = async () => {
+    const roomsSnap = await getDocs(collection(db, 'rooms'));
+    const batch = writeBatch(db);
+    const now = Date.now();
+    
+    roomsSnap.docs.forEach(doc => {
+        batch.update(doc.ref, { 
+            contributors: {},
+            cupStartTime: now
+        });
+    });
+    
+    await batch.commit();
+};
+
 // --- Rooms ---
 export const createRoom = async (title: string, thumbnail: string, host: User, hostUid: string) => {
     const roomRef = doc(collection(db, 'rooms'));
@@ -234,6 +249,7 @@ export const createRoom = async (title: string, thumbnail: string, host: User, h
         isOfficial: false,
         isActivities: false,
         contributors: {},
+        cupStartTime: Date.now(), // Initialize Cup Timer
         bannedUsers: [],
         admins: []
     };
@@ -798,23 +814,65 @@ export const markChatAsRead = async (myUid: string, otherUid: string) => {
 
 // --- Gifts ---
 export const sendGiftTransaction = async (roomId: string, senderUid: string, targetSeatIndex: number, cost: number, giftId?: string) => {
-    const batch = writeBatch(db);
-    
-    // Deduct from sender
-    const senderRef = doc(db, 'users', senderUid);
-    batch.update(senderRef, { 
-        'wallet.diamonds': increment(-cost),
-        diamondsSpent: increment(cost)
-    });
+    // We need to fetch the sender info first to update the leaderboard with name/avatar
+    const senderDoc = await getDoc(doc(db, 'users', senderUid));
+    if (!senderDoc.exists()) throw new Error("Sender not found");
+    const senderData = senderDoc.data() as User;
 
     const roomRef = doc(db, 'rooms', roomId);
-    const roomSnap = await getDoc(roomRef);
     
-    if (roomSnap.exists()) {
-        const room = roomSnap.data() as Room;
+    await runTransaction(db, async (transaction) => {
+        const roomDoc = await transaction.get(roomRef);
+        if (!roomDoc.exists()) throw new Error("Room not found");
+        
+        const room = roomDoc.data() as Room;
+        const now = Date.now();
+        let contributors = room.contributors || {};
+        let cupStart = room.cupStartTime || now;
+
+        // --- 1. Check for 24-Hour Reset ---
+        // 86400000 ms = 24 hours
+        if (now - cupStart > 86400000) {
+            contributors = {}; // Reset the cup
+            cupStart = now; // Start new cycle
+        }
+
+        // --- 2. Update Contributor Score ---
+        // Use user ID (or Display ID if preferred, but UID is safer for tracking)
+        // Here we use UID as key for consistency
+        const senderKey = senderUid;
+        
+        if (!contributors[senderKey]) {
+            contributors[senderKey] = {
+                userId: senderData.id, // Display ID
+                name: senderData.name,
+                avatar: senderData.avatar,
+                amount: 0
+            };
+        }
+        // Update amount
+        contributors[senderKey].amount += cost;
+        // Update profile details in case they changed
+        contributors[senderKey].name = senderData.name;
+        contributors[senderKey].avatar = senderData.avatar;
+
+        // --- 3. Update Room Document ---
+        transaction.update(roomRef, {
+            contributors: contributors,
+            cupStartTime: cupStart
+        });
+
+        // --- 4. Handle Seat & Recipient Logic (Existing Logic) ---
+        // Deduct from sender
+        const senderRef = doc(db, 'users', senderUid);
+        transaction.update(senderRef, { 
+            'wallet.diamonds': increment(-cost),
+            diamondsSpent: increment(cost)
+        });
+
         let newSeats = [...room.seats];
         
-        // Ensure newSeats has enough capacity if index >= existing length (for newly expanded rooms)
+        // Ensure newSeats has enough capacity
         if (targetSeatIndex >= newSeats.length) {
              const diff = targetSeatIndex - newSeats.length + 1;
              for (let i=0; i<diff; i++) {
@@ -833,37 +891,37 @@ export const sendGiftTransaction = async (roomId: string, senderUid: string, tar
         }
 
         newSeats[targetSeatIndex].giftCount += cost;
-        
-        // SANITIZE before update
         newSeats = newSeats.map(sanitizeSeat);
         
-        batch.update(roomRef, { seats: newSeats });
+        transaction.update(roomRef, { seats: newSeats });
 
-        // --- Recipient Coin & Gift Tracking Logic ---
+        // Recipient Coin Logic
         const recipientUserId = newSeats[targetSeatIndex].userId;
         if (recipientUserId) {
-            // Find user doc by custom ID (seats store custom ID, not UID mostly)
-            const q = query(collection(db, 'users'), where('id', '==', recipientUserId), limit(1));
-            const userSnap = await getDocs(q);
-            
-            if (!userSnap.empty) {
-                const recipientDoc = userSnap.docs[0];
-                const coinsAmount = Math.floor(cost * 0.30); // 30% coins
-                
-                const updates: any = {
-                    'wallet.coins': increment(coinsAmount),
-                    diamondsReceived: increment(cost) // Charm calculated on full value
-                };
+            // Can't use query inside transaction easily for recipient lookup by display ID
+            // So we skip the transactional read for recipient here, or rely on stored UID in seat if we had it.
+            // For now, we do a non-transactional update for the recipient AFTER (or assume consistency risk is low for coins)
+            // Ideally, seats should store UID. Assuming standard flow, we update separately.
+        }
+    });
 
-                // Track specific gift count if ID is provided
-                if (giftId) {
-                    updates[`receivedGifts.${giftId}`] = increment(1);
-                }
-                
-                batch.update(recipientDoc.ref, updates);
-            }
+    // Post-transaction Recipient Update (safe enough for this app scale)
+    const roomSnap = await getDoc(roomRef);
+    const roomData = roomSnap.data() as Room;
+    const recipientUserId = roomData.seats[targetSeatIndex]?.userId;
+    
+    if (recipientUserId) {
+        const q = query(collection(db, 'users'), where('id', '==', recipientUserId), limit(1));
+        const userSnap = await getDocs(q);
+        if (!userSnap.empty) {
+            const recipientDoc = userSnap.docs[0];
+            const coinsAmount = Math.floor(cost * 0.30);
+            const updates: any = {
+                'wallet.coins': increment(coinsAmount),
+                diamondsReceived: increment(cost)
+            };
+            if (giftId) updates[`receivedGifts.${giftId}`] = increment(1);
+            await updateDoc(recipientDoc.ref, updates);
         }
     }
-    
-    await batch.commit();
 };

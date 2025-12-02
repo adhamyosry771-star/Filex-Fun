@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { Home, Trophy, User as UserIcon, Users, PlusCircle, Copy, MessageSquare, Loader2, ChevronRight, Crown, ShoppingBag, Wallet as WalletIcon, Settings, Gem, Coins, Edit3, Zap, X, Trash2, Shield, Info, Smartphone, Star, Gamepad2, BadgeCheck, Database } from 'lucide-react';
 import HomeView from './components/HomeView';
@@ -186,6 +185,10 @@ const App: React.FC = () => {
   };
 
   const handleJoinRoom = async (room: Room) => {
+    if (userProfile && room.bannedUsers && room.bannedUsers.includes(userProfile.uid!)) {
+        alert(language === 'ar' ? 'أنت محظور من دخول هذه الغرفة' : 'You are banned from entering this room');
+        return;
+    }
     setActiveRoom(room);
     setMinimizedRoom(null); 
     setCurrentView(ViewState.ROOM);
@@ -195,11 +198,12 @@ const App: React.FC = () => {
   const handleRoomAction = async (action: 'minimize' | 'leave' | 'chat', data?: any) => {
       if (action === 'chat' && data) {
           await handleStartPrivateChat(data);
-          setMinimizedRoom(activeRoom);
-          setActiveRoom(null);
+          // Don't nullify activeRoom, just minimize it implicitly by changing view
+          setMinimizedRoom(activeRoom); 
+          // Do NOT setActiveRoom(null) here, kept active in background
+          // But UI logic below handles visibility
       } else if (action === 'minimize') {
           setMinimizedRoom(activeRoom);
-          setActiveRoom(null);
           setCurrentView(ViewState.HOME);
       } else {
           setActiveRoom(null);
@@ -225,7 +229,12 @@ const App: React.FC = () => {
   };
 
   const handleMaximizeRoom = () => {
-      if (minimizedRoom) {
+      // If we have an active room in background (minimized implicitly or explicitly)
+      if (activeRoom) {
+          setMinimizedRoom(null);
+          setCurrentView(ViewState.ROOM);
+      } else if (minimizedRoom) {
+          // Legacy check if needed
           setActiveRoom(minimizedRoom);
           setMinimizedRoom(null);
           setCurrentView(ViewState.ROOM);
@@ -323,17 +332,9 @@ const App: React.FC = () => {
       case ViewState.HOME:
         return <HomeView rooms={rooms} onJoinRoom={handleJoinRoom} language={language} userProfile={userProfile} onSearch={() => setCurrentView(ViewState.SEARCH)} />;
       
+      // Note: RoomView is handled outside switch to persist state
       case ViewState.ROOM:
-        return activeRoom ? (
-          <RoomView 
-            room={activeRoom} 
-            currentUser={userProfile || CURRENT_USER}
-            onAction={handleRoomAction} 
-            language={language} 
-          />
-        ) : (
-          <HomeView rooms={rooms} onJoinRoom={handleJoinRoom} language={language} userProfile={userProfile} onSearch={() => setCurrentView(ViewState.SEARCH)} />
-        );
+        return null; // Rendered in main wrapper
       
       case ViewState.SEARCH:
         return userProfile ? <SearchView language={language} onBack={() => setCurrentView(ViewState.HOME)} currentUser={userProfile} /> : <div />;
@@ -387,7 +388,6 @@ const App: React.FC = () => {
         ) : <div />;
 
       case ViewState.ADMIN:
-        // Double security check here as well, though button is hidden
         if (userProfile?.id === 'OFFECAL') {
             return <AdminDashboard onBack={() => setCurrentView(ViewState.PROFILE)} language={language} />;
         }
@@ -411,7 +411,6 @@ const App: React.FC = () => {
         const wealthIcon = getIconByLevel(wealthInfo.level, 'wealth');
         const charmIcon = getIconByLevel(charmInfo.level, 'charm');
 
-        // Check specifically for the Owner ID 'OFFECAL' to show the Admin Panel button
         const isOwner = userProfile.id === 'OFFECAL';
 
         return (
@@ -428,7 +427,6 @@ const App: React.FC = () => {
                     <div className={`w-32 h-32 rounded-full relative p-[3px] ${frameClass}`}>
                         <img src={userProfile.avatar} className="w-full h-full rounded-full object-cover border-4 border-gray-900" alt="Profile" />
                     </div>
-                    {/* BADGES REMOVED FROM HERE AS PER REQUEST */}
                     <div className="absolute bottom-1 right-1 bg-brand-600 rounded-full p-1.5 shadow-lg border-2 border-gray-900">
                         <Edit3 className="w-4 h-4 text-white" />
                     </div>
@@ -439,7 +437,6 @@ const App: React.FC = () => {
                     {isOfficial && <BadgeCheck className="w-5 h-5 text-blue-500 fill-white" />}
                  </h2>
 
-                 {/* Badges Row (Admin / VIP) - DISPLAYED HERE */}
                  <div className="flex items-center gap-2 mt-1">
                     {adminRole && (
                        <div className={`text-[10px] font-bold px-3 py-0.5 rounded-full border ${ADMIN_ROLES[adminRole].class}`}>
@@ -453,21 +450,17 @@ const App: React.FC = () => {
                     )}
                  </div>
                  
-                 {/* Levels & ID Row */}
                  <div className="flex flex-wrap justify-center items-center gap-3 mt-4">
-                    {/* Wealth Badge */}
                     <div className={`flex items-center gap-1 px-2 py-1 rounded-full text-[10px] font-bold text-white shadow-md ${wealthIcon.color}`}>
                         <span>{wealthIcon.icon}</span>
                         <span>Lv.{wealthInfo.level}</span>
                     </div>
 
-                    {/* Charm Badge */}
                     <div className={`flex items-center gap-1 px-2 py-1 rounded-full text-[10px] font-bold text-white shadow-md ${charmIcon.color}`}>
                         <span>{charmIcon.icon}</span>
                         <span>Lv.{charmInfo.level}</span>
                     </div>
 
-                    {/* ID Pill */}
                     <span className={`px-3 py-1 rounded-full text-xs flex items-center gap-1 border ${isCustomId ? 'bg-gradient-to-r from-yellow-600 to-yellow-400 text-black font-black border-yellow-200' : 'bg-black/40 border-white/10 text-brand-300'}`}>
                         {t('id')}: {userProfile.id} <Copy className="w-3 h-3 cursor-pointer" />
                     </span>
@@ -633,8 +626,31 @@ const App: React.FC = () => {
   return (
     <div dir={language === 'ar' ? 'rtl' : 'ltr'} className={`w-full h-[100dvh] bg-gray-900 overflow-hidden flex flex-col font-sans relative`}>
       <main className="flex-1 overflow-hidden relative z-10">
-        {renderContent()}
-        {minimizedRoom && !activeRoom && <MiniRoomPlayer room={minimizedRoom} onMaximize={handleMaximizeRoom} onClose={() => setMinimizedRoom(null)} />}
+        {/* ROOM VIEW is PERSISTENT now to keep audio alive. It's just hidden via CSS when not active. */}
+        {activeRoom && (
+            <div className={`absolute inset-0 w-full h-full z-20 ${currentView === ViewState.ROOM ? 'block' : 'hidden'}`}>
+                <RoomView 
+                    room={activeRoom} 
+                    currentUser={userProfile || CURRENT_USER}
+                    onAction={handleRoomAction} 
+                    language={language} 
+                />
+            </div>
+        )}
+        
+        {/* Only render other views if we are NOT in full Room View mode */}
+        <div className={`w-full h-full ${currentView === ViewState.ROOM ? 'hidden' : 'block'}`}>
+            {renderContent()}
+        </div>
+
+        {/* Mini Player appears if we have an active room but we are NOT looking at it */}
+        {((activeRoom && currentView !== ViewState.ROOM) || (minimizedRoom && !activeRoom)) && (
+            <MiniRoomPlayer 
+                room={activeRoom || minimizedRoom!} 
+                onMaximize={handleMaximizeRoom} 
+                onClose={() => { setActiveRoom(null); setMinimizedRoom(null); }} 
+            />
+        )}
       </main>
       
       {currentView !== ViewState.ROOM && currentView !== ViewState.PRIVATE_CHAT && currentView !== ViewState.STORE && currentView !== ViewState.WALLET && currentView !== ViewState.VIP && currentView !== ViewState.ADMIN && currentView !== ViewState.GAMES && currentView !== ViewState.SEARCH && currentView !== ViewState.AGENCY && (
@@ -650,15 +666,13 @@ const App: React.FC = () => {
           </div>
           
           <button onClick={() => setCurrentView(ViewState.MESSAGES)} className={`flex flex-col items-center p-2 rounded-lg transition ${currentView === ViewState.MESSAGES ? 'text-brand-500' : 'text-gray-500'} relative`}>
-              <div className="relative">
-                  <MessageSquare className="w-6 h-6" />
-                  {totalUnread > 0 && (
-                      <div className="absolute -top-1 -right-1 min-w-[16px] h-[16px] bg-red-600 text-white text-[10px] font-bold rounded-full flex items-center justify-center border-2 border-gray-900 z-20">
-                          {totalUnread > 99 ? '99+' : totalUnread}
-                      </div>
-                  )}
-              </div>
+              <MessageSquare className="w-6 h-6" />
               <span className="text-[10px] mt-1 font-bold">{t('msgs')}</span>
+              {totalUnread > 0 && (
+                  <div className="absolute top-1 right-3 min-w-[16px] h-[16px] bg-red-600 text-white text-[9px] font-bold rounded-full flex items-center justify-center border-2 border-gray-900 animate-pulse z-20 px-1">
+                      {totalUnread > 99 ? '99+' : totalUnread}
+                  </div>
+              )}
           </button>
           <button onClick={() => setCurrentView(ViewState.PROFILE)} className={`flex flex-col items-center p-2 rounded-lg transition ${currentView === ViewState.PROFILE ? 'text-brand-500' : 'text-gray-500'}`}><UserIcon className="w-6 h-6" /><span className="text-[10px] mt-1 font-bold">{t('me')}</span></button>
         </nav>

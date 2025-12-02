@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
-import { Shield, Trash2, Ban, Search, Gift, Crown, ArrowLeft, RefreshCw, CheckCircle, Megaphone, Edit3, Send, Home, XCircle, Flame, Image as ImageIcon, Plus, X, Database, Clock, Gamepad2, BadgeCheck, Coins } from 'lucide-react';
-import { getAllUsers, adminUpdateUser, deleteAllRooms, sendSystemNotification, broadcastOfficialMessage, searchUserByDisplayId, getRoomsByHostId, adminBanRoom, deleteRoom, toggleRoomHotStatus, toggleRoomActivitiesStatus, addBanner, deleteBanner, listenToBanners, syncRoomIdsWithUserIds, toggleRoomOfficialStatus, resetAllUsersCoins } from '../services/firebaseService';
+import { Shield, Trash2, Ban, Search, Gift, Crown, ArrowLeft, RefreshCw, CheckCircle, Megaphone, Edit3, Send, Home, XCircle, Flame, Image as ImageIcon, Plus, X, Database, Clock, Gamepad2, BadgeCheck, Coins, Trophy } from 'lucide-react';
+import { getAllUsers, adminUpdateUser, deleteAllRooms, sendSystemNotification, broadcastOfficialMessage, searchUserByDisplayId, getRoomsByHostId, adminBanRoom, deleteRoom, toggleRoomHotStatus, toggleRoomActivitiesStatus, addBanner, deleteBanner, listenToBanners, syncRoomIdsWithUserIds, toggleRoomOfficialStatus, resetAllUsersCoins, resetAllRoomCups } from '../services/firebaseService';
 import { Language, User, Room, Banner } from '../types';
 import { VIP_TIERS, ADMIN_ROLES } from '../constants';
 
@@ -371,6 +371,18 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, language }) => 
       setActionLoading(null);
   };
 
+  const handleResetAllCups = async () => {
+      if (!confirm("⚠️ هل أنت متأكد من تصفير الكأس لجميع الرومات؟ هذا سيحذف جميع المساهمات الحالية.")) return;
+      setActionLoading('reset_cups');
+      try {
+          await resetAllRoomCups();
+          alert("تم تصفير الكؤوس بنجاح!");
+      } catch (e) {
+          alert("فشل العملية");
+      }
+      setActionLoading(null);
+  };
+
   const handleSyncRoomIds = async () => {
       if (!confirm("⚠️ هذا الإجراء سيقوم بتغيير ID جميع الرومات الموجودة لتطابق ID أصحابها. هل أنت متأكد؟")) return;
       setActionLoading('sync_ids');
@@ -428,30 +440,33 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, language }) => 
           const img = new Image();
           img.onload = () => {
               const canvas = document.createElement('canvas');
+              // Aggressive resizing to fit within Firestore 1MB limit
+              const MAX_WIDTH = 700;
+              const MAX_HEIGHT = 400; 
               let width = img.width;
               let height = img.height;
 
-              // Constrain dimensions to ensure small file size
-              const MAX_WIDTH = 700;
-              const MAX_HEIGHT = 400; 
-
-              let ratio = 1;
-              if (width > MAX_WIDTH || height > MAX_HEIGHT) {
-                  const widthRatio = MAX_WIDTH / width;
-                  const heightRatio = MAX_HEIGHT / height;
-                  ratio = Math.min(widthRatio, heightRatio);
+              // Calculate aspect ratio to keep image not distorted
+              if (width > height) {
+                  if (width > MAX_WIDTH) {
+                      height *= MAX_WIDTH / width;
+                      width = MAX_WIDTH;
+                  }
+              } else {
+                  if (height > MAX_HEIGHT) {
+                      width *= MAX_HEIGHT / height;
+                      height = MAX_HEIGHT;
+                  }
               }
 
-              const newWidth = width * ratio;
-              const newHeight = height * ratio;
-
-              canvas.width = newWidth;
-              canvas.height = newHeight;
+              canvas.width = width;
+              canvas.height = height;
               const ctx = canvas.getContext('2d');
               
               if (ctx) {
-                  ctx.drawImage(img, 0, 0, newWidth, newHeight);
+                  ctx.drawImage(img, 0, 0, width, height);
                   // Compress to JPEG with 0.5 quality (Aggressive compression)
+                  // This typically results in files < 100KB, well within Firestore limits
                   const dataUrl = canvas.toDataURL('image/jpeg', 0.5);
                   
                   // Set image directly without error alerts
@@ -815,6 +830,11 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, language }) => 
                       <button onClick={handleResetAllCoins} disabled={actionLoading === 'reset_coins'} className="w-full bg-orange-600 hover:bg-orange-700 text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2">
                           <Coins className="w-5 h-5"/>
                           {actionLoading === 'reset_coins' ? 'جاري التصفير...' : 'تصفير كوينز الجميع'}
+                      </button>
+
+                      <button onClick={handleResetAllCups} disabled={actionLoading === 'reset_cups'} className="w-full bg-yellow-600 hover:bg-yellow-700 text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2">
+                          <Trophy className="w-5 h-5"/>
+                          {actionLoading === 'reset_cups' ? 'جاري التصفير...' : 'تصفير الكأس للجميع'}
                       </button>
                   </div>
               </div>

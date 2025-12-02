@@ -147,6 +147,7 @@ export interface Room {
   isOfficial?: boolean;
   isActivities?: boolean; // New field for Activities Badge
   contributors?: Record<string, Contributor>;
+  cupStartTime?: number; // Timestamp when the current cup started
   bannedUsers?: string[]; // Array of User IDs (UIDs) banned from this room
   admins?: string[]; // Array of User IDs (UIDs) who are room admins
 }

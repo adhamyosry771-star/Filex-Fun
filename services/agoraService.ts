@@ -2,7 +2,7 @@
 import AgoraRTC, { IAgoraRTCClient, IMicrophoneAudioTrack } from 'agora-rtc-sdk-ng';
 
 // ---------------------------------------------------------------------------
-// ⚠️ AGORA CONFIGURATION - LIGHTNING MODE
+// ⚠️ AGORA CONFIGURATION - HIGH QUALITY & STABILITY
 // ---------------------------------------------------------------------------
 const APP_ID = "3c427b50bc824baebaca30a5de42af68"; 
 
@@ -65,8 +65,6 @@ export const joinVoiceChannel = (channelName: string, uid: string | number) => {
             
             // If we are connecting/disconnecting, wait
             if (client.connectionState === 'CONNECTING' || client.connectionState === 'DISCONNECTING') {
-                 // Just return, let the current op finish. 
-                 // Or ideally wait, but here we just skip to avoid errors.
                  return;
             }
 
@@ -94,7 +92,7 @@ export const joinVoiceChannel = (channelName: string, uid: string | number) => {
     return connectionQueue;
 };
 
-// 2. Switch Mic State (LIGHTNING FAST - BYPASS QUEUE)
+// 2. Switch Mic State (OPTIMIZED FOR QUALITY)
 export const switchMicrophoneState = async (shouldPublish: boolean, muted: boolean = false) => {
     if (!client || isMicSwitching) return;
     
@@ -106,14 +104,16 @@ export const switchMicrophoneState = async (shouldPublish: boolean, muted: boole
             // 1. Prepare Track (Parallel to DB updates)
             if (!localAudioTrack) {
                 try {
-                    // Create mic track with optimized settings for voice
+                    // Create mic track with optimized settings for Voice Chat
                     localAudioTrack = await AgoraRTC.createMicrophoneAudioTrack({
-                        encoderConfig: "music_standard", 
-                        AEC: true, // Echo cancellation
-                        ANS: true  // Noise suppression
+                        // "high_quality" gives 48kHz sampling, good for voice & music
+                        encoderConfig: "high_quality_stereo", 
+                        // Enable aggressive noise suppression and echo cancellation
+                        AEC: true, 
+                        ANS: true,
+                        AGC: true // Auto Gain Control (keeps volume steady)
                     });
                 } catch (micError: any) {
-                    // Gracefully handle permission denied to prevent app crash/lag loops
                     if (micError.name === "NotAllowedError" || micError.code === "PERMISSION_DENIED") {
                         console.warn("Microphone permission denied by user.");
                         isMicSwitching = false;
@@ -134,7 +134,6 @@ export const switchMicrophoneState = async (shouldPublish: boolean, muted: boole
             // 3. Publish (Network op)
             // Only publish if not already published to avoid errors
             if (client.connectionState === 'CONNECTED') {
-                // Check if already published to avoid error
                 const isPublished = client.localTracks.some(t => t.trackId === localAudioTrack?.trackId);
                 if (!isPublished) {
                     await client.publish([localAudioTrack]);
@@ -143,15 +142,11 @@ export const switchMicrophoneState = async (shouldPublish: boolean, muted: boole
             }
         } else {
             // --- STOP TALKING ---
-            // If stopping, we can just unpublish or close.
-            
             if (localAudioTrack) {
-                // Unpublish immediately
                 if (client.connectionState === 'CONNECTED') {
                     await client.unpublish([localAudioTrack]).catch(e => log('Unpublish warn', e));
                 }
                 
-                // Stop and close track to release hardware
                 localAudioTrack.stop();
                 localAudioTrack.close();
                 localAudioTrack = null;
@@ -171,9 +166,7 @@ export const unpublishMicrophone = () => switchMicrophoneState(false);
 
 // 3. Leave Channel
 export const leaveVoiceChannel = async () => {
-    // Execute immediately, don't wait for queue if possible
     try {
-        // Stop mic first
         if (localAudioTrack) {
             localAudioTrack.stop();
             localAudioTrack.close();

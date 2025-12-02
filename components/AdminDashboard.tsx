@@ -122,7 +122,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, language }) => 
       setShowBanModal(null);
   };
 
-  const handleSetAdminRole = async (uid: string, role: 'super_admin' | 'admin' | null) => {
+  const handleSetAdminRole = async (uid: string, role: 'super_admin' | 'admin' | 'official_manager' | 'me_manager' | null) => {
       setActionLoading(uid);
       try {
           await adminUpdateUser(uid, { 
@@ -585,11 +585,13 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, language }) => 
                                           )}
                                       </div>
                                       
-                                      {/* Role Management */}
-                                      <div className="mt-2 pt-2 border-t border-gray-800 flex gap-1">
-                                           <button onClick={() => handleSetAdminRole(searchedUser.uid!, 'super_admin')} className="flex-1 bg-red-500/10 text-red-500 border border-red-500/30 text-[10px] py-1 rounded hover:bg-red-500/20">Super Admin</button>
-                                           <button onClick={() => handleSetAdminRole(searchedUser.uid!, 'admin')} className="flex-1 bg-yellow-500/10 text-yellow-500 border border-yellow-500/30 text-[10px] py-1 rounded hover:bg-yellow-500/20">Admin</button>
-                                           <button onClick={() => handleSetAdminRole(searchedUser.uid!, null)} className="flex-1 bg-gray-700 text-gray-400 text-[10px] py-1 rounded hover:bg-gray-600">إزالة الرتبة</button>
+                                      {/* Role Management Grid */}
+                                      <div className="mt-2 pt-2 border-t border-gray-800 grid grid-cols-2 gap-1">
+                                           <button onClick={() => handleSetAdminRole(searchedUser.uid!, 'super_admin')} className="bg-red-500/10 text-red-500 border border-red-500/30 text-[10px] py-1 rounded hover:bg-red-500/20">Super Admin</button>
+                                           <button onClick={() => handleSetAdminRole(searchedUser.uid!, 'admin')} className="bg-yellow-500/10 text-yellow-500 border border-yellow-500/30 text-[10px] py-1 rounded hover:bg-yellow-500/20">Admin</button>
+                                           <button onClick={() => handleSetAdminRole(searchedUser.uid!, 'official_manager')} className="bg-cyan-500/10 text-cyan-500 border border-cyan-500/30 text-[10px] py-1 rounded hover:bg-cyan-500/20">المدير الرسمي</button>
+                                           <button onClick={() => handleSetAdminRole(searchedUser.uid!, 'me_manager')} className="bg-emerald-500/10 text-emerald-500 border border-emerald-500/30 text-[10px] py-1 rounded hover:bg-emerald-500/20">مدير الشرق</button>
+                                           <button onClick={() => handleSetAdminRole(searchedUser.uid!, null)} className="col-span-2 bg-gray-700 text-gray-400 text-[10px] py-1 rounded hover:bg-gray-600">إزالة الرتبة</button>
                                       </div>
                                   </div>
                               ) : <div className="text-gray-500 p-4">لم يتم العثور على مستخدم</div>}
@@ -650,8 +652,13 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, language }) => 
                                           <span className={`font-bold text-sm ${user.isAdmin ? 'text-red-400' : 'text-white'}`}>{user.name}</span>
                                           {user.vip && <span className="text-[9px] bg-gold-500 text-black px-1 rounded font-bold">V{user.vipLevel}</span>}
                                           {user.adminRole && (
-                                              <span className={`text-[8px] px-1 rounded border ${user.adminRole === 'super_admin' ? 'border-red-500 text-red-500' : 'border-yellow-500 text-yellow-500'}`}>
-                                                  {user.adminRole === 'super_admin' ? 'Super Admin' : 'Admin'}
+                                              <span className={`text-[8px] px-1 rounded border ${
+                                                  user.adminRole === 'super_admin' ? 'border-red-500 text-red-500' : 
+                                                  user.adminRole === 'admin' ? 'border-yellow-500 text-yellow-500' :
+                                                  user.adminRole === 'official_manager' ? 'border-cyan-500 text-cyan-500' :
+                                                  'border-emerald-500 text-emerald-500'
+                                              }`}>
+                                                  {ADMIN_ROLES[user.adminRole]?.name?.ar || user.adminRole}
                                               </span>
                                           )}
                                           {user.isAgent && <span className="text-[8px] bg-blue-600 text-white px-1 rounded font-bold">وكيل</span>}
@@ -675,6 +682,8 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, language }) => 
           </div>
       )}
 
+      {/* Agencies, Banners, Official, System, Modals... same as before */}
+      {/* ... (rest of the component remains unchanged, assuming standard structure) ... */}
       {activeTab === 'agencies' && (
           <div className="flex-1 p-6 flex flex-col overflow-y-auto">
               <h3 className="font-bold text-blue-400 mb-4 flex items-center gap-2">

@@ -97,11 +97,19 @@ export const GAMES: Game[] = [
 export const ADMIN_ROLES = {
   super_admin: {
     name: { ar: 'سوبر أدمن', en: 'Super Admin' },
-    class: 'bg-red-600/20 text-red-500 border border-red-500 shadow-[0_0_15px_rgba(239,68,68,0.5)] animate-pulse'
+    class: 'bg-red-950/90 text-red-500 border border-red-500 shadow-[0_0_15px_rgba(239,68,68,0.6)] animate-pulse'
   },
   admin: {
     name: { ar: 'أدمن', en: 'Admin' },
-    class: 'bg-yellow-600/20 text-yellow-500 border border-yellow-500 shadow-[0_0_10px_rgba(234,179,8,0.5)]'
+    class: 'bg-yellow-950/90 text-yellow-500 border border-yellow-500 shadow-[0_0_10px_rgba(234,179,8,0.6)]'
+  },
+  official_manager: {
+    name: { ar: 'المدير الرسمي', en: 'Official Manager' },
+    class: 'bg-slate-900/90 text-cyan-400 border border-cyan-400 shadow-[0_0_15px_rgba(34,211,238,0.7)] font-black tracking-wide'
+  },
+  me_manager: {
+    name: { ar: 'مدير الشرق الأوسط', en: 'ME Manager' },
+    class: 'bg-slate-900/90 text-emerald-400 border border-emerald-400 shadow-[0_0_15px_rgba(52,211,153,0.7)] font-black tracking-wide'
   }
 };
 

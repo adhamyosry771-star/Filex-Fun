@@ -270,11 +270,50 @@ export const updateRoomDetails = async (roomId: string, updates: Partial<Room>) 
     await updateDoc(doc(db, 'rooms', roomId), updates);
 };
 
+// --- REAL-TIME VIEWER TRACKING ---
+// New: Add user to 'viewers' subcollection
+export const enterRoom = async (roomId: string, user: User) => {
+    if (!roomId || !user.uid) return;
+    const viewerRef = doc(db, `rooms/${roomId}/viewers`, user.uid);
+    await setDoc(viewerRef, {
+        uid: user.uid,
+        id: user.id,
+        name: user.name,
+        avatar: user.avatar,
+        adminRole: user.adminRole || null,
+        vipLevel: user.vipLevel || 0,
+        equippedFrame: user.equippedFrame || null,
+        timestamp: Date.now()
+    });
+    // Increment global count for sorting/popularity
+    await updateDoc(doc(db, 'rooms', roomId), { viewerCount: increment(1) });
+};
+
+// New: Remove user from 'viewers' subcollection
+export const exitRoom = async (roomId: string, userId: string) => {
+    if (!roomId || !userId) return;
+    await deleteDoc(doc(db, `rooms/${roomId}/viewers`, userId));
+    // Decrement global count
+    await updateDoc(doc(db, 'rooms', roomId), { viewerCount: increment(-1) });
+};
+
+// New: Listen to real-time viewer list
+export const listenToRoomViewers = (roomId: string, callback: (viewers: User[]) => void): Unsubscribe => {
+    const q = query(collection(db, `rooms/${roomId}/viewers`), orderBy('timestamp', 'desc'));
+    return onSnapshot(q, (snap) => {
+        const viewers: User[] = [];
+        snap.forEach(d => viewers.push(d.data() as User));
+        callback(viewers);
+    });
+};
+
 export const incrementViewerCount = async (roomId: string) => {
+    // Deprecated for direct usage, now handled in enterRoom, kept for fallback compatibility
     await updateDoc(doc(db, 'rooms', roomId), { viewerCount: increment(1) });
 };
 
 export const decrementViewerCount = async (roomId: string) => {
+    // Deprecated for direct usage, now handled in exitRoom, kept for fallback compatibility
     await updateDoc(doc(db, 'rooms', roomId), { viewerCount: increment(-1) });
 };
 
@@ -564,10 +603,6 @@ export const resetAllUsersCoins = async () => {
     const usersSnap = await getDocs(collection(db, 'users'));
     const batch = writeBatch(db);
     // Note: For a very large user base (>500), this should be chunked.
-    // For this implementation, we assume <500 for the single batch limit, 
-    // or simply accept that it processes the first 500. 
-    // For safety in a production-like demo, we'll process it in a simple loop if needed, 
-    // but the batch is preferred for atomicity.
     let count = 0;
     usersSnap.forEach(doc => {
         if (count < 499) { // Safety limit for batch

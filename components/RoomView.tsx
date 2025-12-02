@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { ArrowLeft, Send, Heart, Share2, Gift as GiftIcon, Users, Crown, Mic, MicOff, Lock, Unlock, Settings, Image as ImageIcon, X, Info, Minimize2, LogOut, BadgeCheck, Loader2, Upload, Shield, Trophy, Bot, Volume2, VolumeX, ArrowDownCircle, Ban, Trash2, UserCog, UserMinus, Zap, BarChart3, Gamepad2 } from 'lucide-react';
 import { Room, ChatMessage, Gift, Language, User, RoomSeat } from '../types';
 import { GIFTS, STORE_ITEMS, ROOM_BACKGROUNDS, VIP_TIERS, ADMIN_ROLES } from '../constants';
-import { listenToMessages, sendMessage, takeSeat, leaveSeat, updateRoomDetails, sendGiftTransaction, toggleSeatLock, toggleSeatMute, decrementViewerCount, listenToRoom, kickUserFromSeat, banUserFromRoom, unbanUserFromRoom, removeRoomAdmin, addRoomAdmin, searchUserByDisplayId } from '../services/firebaseService';
+import { listenToMessages, sendMessage, takeSeat, leaveSeat, updateRoomDetails, sendGiftTransaction, toggleSeatLock, toggleSeatMute, decrementViewerCount, listenToRoom, kickUserFromSeat, banUserFromRoom, unbanUserFromRoom, removeRoomAdmin, addRoomAdmin, searchUserByDisplayId, enterRoom, exitRoom, listenToRoomViewers } from '../services/firebaseService';
 import { joinVoiceChannel, leaveVoiceChannel, toggleMicMute, publishMicrophone, unpublishMicrophone, toggleAllRemoteAudio } from '../services/agoraService';
 import { generateAiHostResponse } from '../services/geminiService';
 import UserProfileModal from './UserProfileModal';
@@ -57,6 +57,9 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
   const [settingsTab, setSettingsTab] = useState<'info' | 'background' | 'banned' | 'admins'>('info');
   const [bgType, setBgType] = useState<'inner' | 'outer'>('inner');
 
+  // New: Active Viewer List State
+  const [viewers, setViewers] = useState<User[]>([]);
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   
   // Track join time to hide history
@@ -75,7 +78,6 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
 
   // --- SEAT LOGIC: Ensure 11 Seats (1 Host + 10 Guests) ---
   const seats: RoomSeat[] = Array(11).fill(null).map((_, i) => {
-      // Return real seat if exists, otherwise return empty placeholder
       return (room.seats && room.seats[i]) ? room.seats[i] : { 
           index: i, 
           userId: null, 
@@ -108,11 +110,23 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
           joinVoiceChannel(room.id, uid);
       }
 
+      // Enter Room (Add to Viewers list)
+      if (currentUser.uid) {
+          enterRoom(room.id, currentUser);
+      }
+
       return () => {
-          // Cleanup handled by handleLeaveRoomAction mostly, but this is a fail-safe
-          leaveVoiceChannel().catch(() => {});
+          // IMPORTANT: We do NOT leave voice channel or exit room on simple unmount
+          // because we want background audio and minimized state.
+          // Explicit leave is handled by handleLeaveRoomAction
       };
-  }, [room.id]); // Keep dependency stable
+  }, [room.id]);
+
+  // --- LISTEN TO ROOM VIEWERS ---
+  useEffect(() => {
+      const unsub = listenToRoomViewers(room.id, (v) => setViewers(v));
+      return () => unsub();
+  }, [room.id]);
 
   // --- SEND JOIN MESSAGE ON MOUNT ---
   useEffect(() => {
@@ -194,7 +208,6 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
       return () => unsubscribe();
   }, [initialRoom.id, onAction, showRoomSettings, currentUser.uid]);
 
-  // Derived state for my seat status to prevent unnecessary re-runs
   const mySeatIndex = mySeat?.index;
   const mySeatMuted = mySeat?.isMuted;
   const amISeated = !!mySeat;
@@ -288,8 +301,8 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
       placeholder: { ar: 'اكتب رسالة...', en: 'Type a message...' },
       pinned: { ar: 'أهلاً بك في فليكس فن! يرجى الالتزام بالاحترام المتبادل.', en: 'Welcome to Flex Fun!' },
       appRules: { 
-          ar: 'مرحباً في Flex Fun! يرجى الالتزام بالاحترام المتبادل ممنوع السب، الشتم، او الكلام المسئ. نحن مجتمع راق للمتعه والتواصل.', 
-          en: 'Welcome to Flex Fun! Please maintain mutual respect. No insults, cursing, or abusive language. We are a classy community for fun and connection.' 
+          ar: 'مرحباً في Flex Fun! يرجى الالتزام بالاحترام المتبادل ممنوع السب، الشتم، او الكلام المسئ.', 
+          en: 'Welcome to Flex Fun! Please maintain mutual respect. No insults, cursing, or abusive language.' 
       },
       host: { ar: 'المضيف', en: 'Host' },
       exitTitle: { ar: 'مغادرة الغرفة', en: 'Exit Room' },
@@ -487,7 +500,10 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
               if (isSeatedRef.current && currentUserRef.current) {
                   await leaveSeat(room.id, currentUserRef.current);
               }
-              await decrementViewerCount(room.id);
+              // Remove user from viewers list
+              if (currentUserRef.current.uid) {
+                  await exitRoom(room.id, currentUserRef.current.uid);
+              }
           } catch (e) {
               console.error("Background cleanup error:", e);
           }
@@ -584,7 +600,20 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
 
   const filteredGifts = GIFTS.filter(g => g.type === giftTab);
 
+  // Helper to click user in Viewer List
+  const handleViewerClick = (user: User) => {
+      // Create a temporary seat-like object for the modal
+      const tempUser: any = {
+          userId: user.id,
+          userName: user.name,
+          userAvatar: user.avatar,
+          ...user // spread full user props if available
+      };
+      setSelectedUser(tempUser);
+  };
+
   return (
+    // DVH Fix for Mobile Browsers: Use h-[100dvh] instead of h-screen
     <div className="relative h-[100dvh] w-full bg-black flex flex-col overflow-hidden">
       
       {/* 1. BACKGROUND */}
@@ -603,7 +632,7 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
       ))}
 
       {/* 2. HEADER */}
-      <div className="relative z-50 pt-safe-top px-3 pb-2 flex items-center justify-between gap-2 bg-gradient-to-b from-black/80 to-transparent w-full">
+      <div className="relative z-50 pt-safe-top px-3 pb-2 flex items-center justify-between gap-2 bg-gradient-to-b from-black/80 to-transparent w-full shrink-0 h-[60px]">
         <div className="flex items-center gap-2 min-w-0 flex-1">
             <button onClick={() => setShowExitModal(true)} className="shrink-0 p-2 bg-white/10 rounded-full hover:bg-white/20 backdrop-blur border border-white/5">
                 <ArrowLeft className="w-5 h-5 rtl:rotate-180 text-white" />
@@ -622,17 +651,17 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
         <div className="flex gap-1.5 shrink-0 items-center">
             <button onClick={() => setShowLeaderboard(true)} className="bg-yellow-500/20 backdrop-blur px-2 py-1.5 rounded-full text-[10px] font-black text-yellow-400 border border-yellow-500/50 flex gap-1"><Trophy className="w-3 h-3"/> {t('cup')}</button>
             {canManageRoom && <button onClick={() => setShowRoomSettings(true)} className="p-1.5 bg-white/10 rounded-full text-white"><Settings className="w-4 h-4" /></button>}
-            <button onClick={() => setShowUserList(true)} className="bg-white/10 backdrop-blur px-2 py-1.5 rounded-full text-[10px] font-bold text-white flex items-center gap-1"><Users className="w-3 h-3" /> {room.viewerCount}</button>
+            <button onClick={() => setShowUserList(true)} className="bg-white/10 backdrop-blur px-2 py-1.5 rounded-full text-[10px] font-bold text-white flex items-center gap-1"><Users className="w-3 h-3" /> {viewers.length}</button>
         </div>
       </div>
 
-      {/* 3. MIC GRID */}
-      <div className="relative z-10 w-full px-2 pt-2 pb-2 flex-1 flex flex-col">
+      {/* 3. MIC GRID - Shrink 0 to prevent collapse */}
+      <div className="relative z-10 w-full px-2 pt-2 pb-2 shrink-0 flex flex-col items-center">
           {/* Host (Index 0) */}
-          <div className="flex justify-center mb-4">
+          <div className="flex justify-center mb-4 shrink-0">
              {seats.slice(0, 1).map((seat) => (
                  <div key={seat.index} className="flex flex-col items-center relative group">
-                    <div onClick={() => handleSeatClick(seat.index, seat.userId)} className={`w-16 h-16 rounded-full relative bg-black/40 backdrop-blur overflow-visible cursor-pointer transition transform hover:scale-105 p-[3px] ${seat.userId ? getFrameClass(seat.frameId) : 'border-2 border-white/20 border-dashed'}`}>
+                    <div onClick={() => handleSeatClick(seat.index, seat.userId)} className={`w-20 h-20 rounded-full relative bg-black/40 backdrop-blur overflow-visible cursor-pointer transition transform hover:scale-105 p-[3px] ${seat.userId ? getFrameClass(seat.frameId) : 'border-2 border-white/20 border-dashed'}`}>
                          {loadingSeatIndex === seat.index ? <Loader2 className="w-8 h-8 text-brand-500 animate-spin absolute inset-0 m-auto" /> : seat.userId ? (
                              <><img src={seat.userAvatar!} className="w-full h-full rounded-full object-cover" />{!seat.isMuted && <div className="absolute inset-0 rounded-full border-2 border-brand-400 animate-ping opacity-50"></div>}{seat.isMuted && <div className="absolute inset-0 rounded-full bg-black/50 flex items-center justify-center"><MicOff className="w-5 h-5 text-red-500"/></div>}<div className="absolute -top-3 -right-1 bg-yellow-500 p-1 rounded-full"><Crown className="w-3 h-3 text-black" /></div></>
                          ) : <div className="text-gray-400 text-[10px] text-center w-full h-full flex items-center justify-center">{t('host')}</div>}
@@ -644,22 +673,22 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
           </div>
           
           {/* Guests (Indices 1-10) - 2 Rows of 5 */}
-          <div className="grid grid-cols-5 gap-y-4 gap-x-2 justify-items-center">
+          <div className="grid grid-cols-5 gap-y-4 gap-x-2 justify-items-center w-full max-w-md shrink-0">
              {seats.slice(1).map((seat) => (
                  <div key={seat.index} className="flex flex-col items-center w-full relative">
-                    <div onClick={() => handleSeatClick(seat.index, seat.userId)} className={`w-12 h-12 rounded-full relative bg-black/30 backdrop-blur p-[2px] ${seat.userId ? getFrameClass(seat.frameId) : 'border border-white/10 border-dashed'} flex items-center justify-center`}>
+                    <div onClick={() => handleSeatClick(seat.index, seat.userId)} className={`w-14 h-14 rounded-full relative bg-black/30 backdrop-blur p-[2px] ${seat.userId ? getFrameClass(seat.frameId) : 'border border-white/10 border-dashed'} flex items-center justify-center`}>
                         {loadingSeatIndex === seat.index ? <Loader2 className="w-6 h-6 text-brand-500 animate-spin" /> : seat.userId ? (
                             <><img src={seat.userAvatar!} className="w-full h-full rounded-full object-cover" />{!seat.isMuted && <div className="absolute inset-0 rounded-full border border-green-400 animate-ping opacity-40"></div>}{seat.isMuted && <div className="absolute inset-0 rounded-full bg-black/50 flex items-center justify-center"><MicOff className="w-4 h-4 text-red-500"/></div>}</>
                         ) : (seat.isLocked ? <Lock className="w-4 h-4 text-red-400/70" /> : <span className="text-white/20 text-[10px] font-bold">{seat.index}</span>)}
                     </div>
-                    <div className="mt-1 max-w-[55px] truncate text-[8px] text-white/90 bg-white/10 px-2 py-0.5 rounded-full">{seat.userId ? seat.userName : (seat.isLocked ? t('lock') : '')}</div>
+                    <div className="mt-1 max-w-[65px] truncate text-[8px] text-white/90 bg-white/10 px-2 py-0.5 rounded-full">{seat.userId ? seat.userName : (seat.isLocked ? t('lock') : '')}</div>
                     <div className="mt-0.5 text-[7px] text-yellow-500 font-mono flex items-center gap-0.5">{seat.giftCount > 0 && <><GiftIcon className="w-2 h-2"/> {seat.giftCount}</>}</div>
                  </div>
              ))}
           </div>
 
           {/* ACTIVE SPEAKERS BAR */}
-          <div className="mt-3 mx-4 p-2 bg-white/5 backdrop-blur-md border border-white/10 rounded-2xl flex items-center justify-between shadow-lg animate-in fade-in slide-in-from-bottom-2">
+          <div className="mt-3 w-full max-w-sm p-2 bg-white/5 backdrop-blur-md border border-white/10 rounded-2xl flex items-center justify-between shadow-lg animate-in fade-in slide-in-from-bottom-2 shrink-0">
               <div className="flex items-center gap-2">
                  <div className="p-1.5 bg-brand-500/20 rounded-full text-brand-400 border border-brand-500/30">
                     <BarChart3 className="w-4 h-4" />
@@ -682,9 +711,9 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
           </div>
       </div>
 
-      {/* 4. CHAT AREA */}
-      <div className="relative z-20 flex-1 flex flex-col min-h-[45%] bg-gradient-to-t from-black via-black/80 to-transparent">
-          <div className="px-4 py-3 mx-4 mt-2 bg-brand-900/60 backdrop-blur border-l-4 border-brand-500 rounded-r-lg mb-2 shadow-sm animate-in fade-in flex flex-col gap-1">
+      {/* 4. CHAT AREA - Flex Grow to fill remaining space properly */}
+      <div className="relative z-20 flex-1 flex flex-col min-h-0 bg-gradient-to-t from-black via-black/80 to-transparent w-full">
+          <div className="px-4 py-3 mx-4 mt-2 bg-brand-900/60 backdrop-blur border-l-4 border-brand-500 rounded-r-lg mb-2 shadow-sm animate-in fade-in flex flex-col gap-1 shrink-0">
               <div className="flex items-start gap-2 border-b border-white/10 pb-2 mb-1">
                   <Shield className="w-3 h-3 text-gold-400 mt-0.5 shrink-0" />
                   <p className="text-[10px] text-gold-100 font-bold leading-tight">{t('appRules')}</p>
@@ -695,7 +724,7 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
               </div>
           </div>
 
-          <div className="flex-1 overflow-y-auto px-4 space-y-2 scrollbar-hide pb-2 mask-image-gradient relative">
+          <div className="flex-1 overflow-y-auto px-4 space-y-2 scrollbar-hide pb-2 mask-image-gradient relative w-full">
               {messages.map((msg) => {
                   const isMe = msg.userId === currentUser.id;
                   const isOfficial = msg.userId === 'OFFECAL' || (msg.userId === room.hostId && room.hostId === 'OFFECAL');
@@ -726,7 +755,15 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
                           <div className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} max-w-[80%]`}>
                               <div className="flex items-center gap-1 mb-0.5 px-1 flex-wrap">
                                    {(msg.vipLevel || 0) > 0 && <span className="bg-gradient-to-r from-gold-400 to-orange-500 text-black text-[8px] font-black px-1 rounded">V{msg.vipLevel}</span>}
-                                   {msg.adminRole && <span className={`text-[8px] px-1 rounded border flex items-center gap-0.5 ${msg.adminRole === 'super_admin' ? 'border-red-500 text-red-400 bg-red-900/30' : 'border-yellow-500 text-yellow-400 bg-yellow-900/30'}`}><Shield className="w-2 h-2" /> {msg.adminRole === 'super_admin' ? 'SUPER ADMIN' : 'ADMIN'}</span>}
+                                   
+                                   {/* DYNAMIC ADMIN BADGE RENDERING */}
+                                   {msg.adminRole && ADMIN_ROLES[msg.adminRole] && (
+                                       <span className={`text-[8px] px-1.5 py-0.5 rounded border flex items-center gap-0.5 ${ADMIN_ROLES[msg.adminRole].class}`}>
+                                           <Shield className="w-2 h-2" /> 
+                                           {ADMIN_ROLES[msg.adminRole].name[language]}
+                                       </span>
+                                   )}
+
                                    <span className={`text-[10px] font-bold flex items-center gap-1 ${getVipTextStyle(msg.vipLevel || 0)}`}>{msg.userName}{isOfficial && <BadgeCheck className="w-3 h-3 text-blue-500 fill-white inline" />}{isAi && <span className="text-[8px] bg-brand-600 text-white px-1 rounded">BOT</span>}</span>
                               </div>
                               <div className={`px-3 py-1.5 text-xs leading-relaxed text-white shadow-sm break-words border border-white/5 backdrop-blur-md ${bubbleClass} ${isMe ? 'rounded-tr-none' : 'rounded-tl-none'}`}>{msg.text}</div>
@@ -750,7 +787,7 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
 
           {floatingHearts.map((h) => (<Heart key={h.id} className="absolute bottom-20 w-6 h-6 text-pink-500 fill-pink-500 animate-float pointer-events-none z-50 drop-shadow-lg" style={{ left: `${h.left}%` }}/>))}
 
-          <div className="p-3 bg-black/60 backdrop-blur-md border-t border-white/10 flex items-center gap-3">
+          <div className="p-3 bg-black/60 backdrop-blur-md border-t border-white/10 flex items-center gap-3 shrink-0">
               <button onClick={handleToggleMyMute} className={`p-2 rounded-full shadow-lg transition duration-75 active:scale-95 ${mySeat?.isMuted ? 'bg-red-500 text-white' : 'bg-white/10 text-white hover:bg-white/20'}`}>{mySeat?.isMuted ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}</button>
               <button onClick={handleToggleSpeaker} className={`p-2 rounded-full shadow-lg transition ${isSpeakerMuted ? 'bg-gray-700 text-gray-400' : 'bg-white/10 text-brand-400 hover:bg-white/20'}`}>{isSpeakerMuted ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}</button>
               <button onClick={() => setShowGiftPanel(true)} disabled={isSendingGift} className="p-2 rounded-full bg-gradient-to-r from-pink-500 to-rose-500 text-white shadow-lg shadow-pink-500/20 hover:scale-105 transition disabled:opacity-50"><GiftIcon className="w-5 h-5" /></button>
@@ -869,28 +906,33 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
               <div className="w-full max-w-sm bg-gray-900 border border-gray-700 rounded-2xl shadow-2xl overflow-hidden max-h-[60vh] flex flex-col">
                   <div className="p-4 border-b border-gray-800 flex justify-between items-center bg-gray-800/50">
                       <h3 className="font-bold text-white flex items-center gap-2">
-                          <Users className="w-4 h-4 text-brand-400"/> {t('activeUsers')} ({seats.filter(s => s.userId).length})
+                          <Users className="w-4 h-4 text-brand-400"/> {t('activeUsers')} ({viewers.length})
                       </h3>
                       <button onClick={() => setShowUserList(false)}><X className="w-5 h-5 text-gray-500" /></button>
                   </div>
                   <div className="overflow-y-auto p-2 space-y-2 flex-1">
-                      {seats.filter(s => s.userId).map(seat => (
-                          <div key={seat.index} className="flex items-center gap-3 p-2 bg-gray-800/30 rounded-xl border border-transparent hover:border-gray-700">
-                              <img src={seat.userAvatar!} className="w-10 h-10 rounded-full object-cover border border-gray-600" />
-                              <div className="flex-1">
-                                  <div className="flex items-center gap-1">
-                                      <span className="text-sm text-white font-bold">{seat.userName}</span>
-                                      {seat.userId === 'OFFECAL' && <BadgeCheck className="w-3 h-3 text-blue-500 fill-white" />}
+                      {viewers.length === 0 ? <div className="text-center text-gray-500 py-4">No users found</div> : viewers.map(viewer => {
+                          const seat = seats.find(s => s.userId === viewer.id);
+                          return (
+                              <div key={viewer.uid || viewer.id} onClick={() => handleViewerClick(viewer)} className="flex items-center gap-3 p-2 bg-gray-800/30 rounded-xl border border-transparent hover:border-gray-700 cursor-pointer">
+                                  <img src={viewer.avatar} className="w-10 h-10 rounded-full object-cover border border-gray-600" />
+                                  <div className="flex-1">
+                                      <div className="flex items-center gap-1">
+                                          <span className="text-sm text-white font-bold">{viewer.name}</span>
+                                          {viewer.id === 'OFFECAL' && <BadgeCheck className="w-3 h-3 text-blue-500 fill-white" />}
+                                      </div>
+                                      <span className="text-[10px] text-gray-500">ID: {viewer.id}</span>
                                   </div>
-                                  <span className="text-[10px] text-gray-500">Seat #{seat.index} {seat.index === 0 ? '(Host)' : ''}</span>
+                                  {seat ? (
+                                      <div className="bg-brand-600/20 text-brand-400 text-[9px] px-2 py-0.5 rounded border border-brand-600/50">
+                                          {seat.index === 0 ? 'Host' : `Seat ${seat.index}`}
+                                      </div>
+                                  ) : (
+                                      <div className="text-gray-600 text-[9px]">Audience</div>
+                                  )}
                               </div>
-                              {seat.giftCount > 0 && (
-                                  <div className="text-yellow-500 text-xs font-mono font-bold flex items-center gap-1">
-                                      <GiftIcon className="w-3 h-3" /> {seat.giftCount}
-                                  </div>
-                              )}
-                          </div>
-                      ))}
+                          );
+                      })}
                   </div>
               </div>
           </div>

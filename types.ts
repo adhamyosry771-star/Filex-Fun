@@ -53,7 +53,7 @@ export interface User {
   followingCount?: number;
   visitorsCount?: number;
   isAdmin?: boolean;
-  adminRole?: 'super_admin' | 'admin' | null;
+  adminRole?: 'super_admin' | 'admin' | 'official_manager' | 'me_manager' | null;
   bio?: string;
   isBanned?: boolean;
   banExpiresAt?: number; // Timestamp for when ban ends
@@ -86,7 +86,7 @@ export interface ChatMessage {
   frameId?: string | null;
   bubbleId?: string | null;
   vipLevel?: number;
-  adminRole?: 'super_admin' | 'admin' | null;
+  adminRole?: 'super_admin' | 'admin' | 'official_manager' | 'me_manager' | null;
 }
 
 export interface PrivateMessage {
@@ -118,7 +118,7 @@ export interface RoomSeat {
   isMuted: boolean;
   isLocked: boolean;
   giftCount: number;
-  adminRole?: 'super_admin' | 'admin' | null;
+  adminRole?: 'super_admin' | 'admin' | 'official_manager' | 'me_manager' | null;
 }
 
 export interface Contributor {

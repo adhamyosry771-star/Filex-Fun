@@ -11,6 +11,9 @@ let localAudioTrack: IMicrophoneAudioTrack | null = null;
 let isRoomAudioMuted = false;
 let currentChannel = '';
 
+// Volume Callback
+let volumeCallback: ((volumes: { uid: string | number, level: number }[]) => void) | null = null;
+
 // Queue to prevent race conditions only for critical Join/Leave ops
 let connectionQueue: Promise<void> = Promise.resolve();
 
@@ -30,6 +33,12 @@ export const initializeAgora = async () => {
     log('Initializing Client...');
     client = AgoraRTC.createClient({ mode: "rtc", codec: "vp8" });
     
+    // Enable Volume Indicator
+    client.enableAudioVolumeIndicator();
+    client.on("volume-indicator", (volumes) => {
+        if (volumeCallback) volumeCallback(volumes);
+    });
+    
     // Auto-subscribe to all users instantly to ensure audio plays immediately
     client.on("user-published", async (user, mediaType) => {
         try {
@@ -48,6 +57,10 @@ export const initializeAgora = async () => {
     client.on("user-unpublished", (user) => {
         // Agora handles cleanup automatically usually
     });
+};
+
+export const listenToVolume = (cb: (volumes: { uid: string | number, level: number }[]) => void) => {
+    volumeCallback = cb;
 };
 
 // 1. Join Channel (FAST & ROBUST)

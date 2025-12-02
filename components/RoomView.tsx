@@ -4,7 +4,7 @@ import { ArrowLeft, Send, Heart, Share2, Gift as GiftIcon, Users, Crown, Mic, Mi
 import { Room, ChatMessage, Gift, Language, User, RoomSeat } from '../types';
 import { GIFTS, STORE_ITEMS, ROOM_BACKGROUNDS, VIP_TIERS, ADMIN_ROLES } from '../constants';
 import { listenToMessages, sendMessage, takeSeat, leaveSeat, updateRoomDetails, sendGiftTransaction, toggleSeatLock, toggleSeatMute, decrementViewerCount, listenToRoom, kickUserFromSeat, banUserFromRoom, unbanUserFromRoom, removeRoomAdmin, addRoomAdmin, searchUserByDisplayId, enterRoom, exitRoom, listenToRoomViewers } from '../services/firebaseService';
-import { joinVoiceChannel, leaveVoiceChannel, toggleMicMute, publishMicrophone, unpublishMicrophone, toggleAllRemoteAudio } from '../services/agoraService';
+import { joinVoiceChannel, leaveVoiceChannel, toggleMicMute, publishMicrophone, unpublishMicrophone, toggleAllRemoteAudio, listenToVolume } from '../services/agoraService';
 import { generateAiHostResponse } from '../services/geminiService';
 import UserProfileModal from './UserProfileModal';
 import RoomLeaderboard from './RoomLeaderboard';
@@ -59,6 +59,9 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
 
   // New: Active Viewer List State
   const [viewers, setViewers] = useState<User[]>([]);
+  const viewersRef = useRef<User[]>([]);
+
+  const [speakingUsers, setSpeakingUsers] = useState<Set<string>>(new Set());
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   
@@ -124,9 +127,42 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
 
   // --- LISTEN TO ROOM VIEWERS ---
   useEffect(() => {
-      const unsub = listenToRoomViewers(room.id, (v) => setViewers(v));
+      const unsub = listenToRoomViewers(room.id, (v) => {
+          setViewers(v);
+          viewersRef.current = v;
+      });
       return () => unsub();
   }, [room.id]);
+
+  // --- LISTEN TO VOLUME INDICATOR ---
+  useEffect(() => {
+      listenToVolume((volumes) => {
+          const speaking = new Set<string>();
+          volumes.forEach(v => {
+              if (v.level > 5) { // Sensitivity threshold
+                  let authUid = String(v.uid);
+                  // 0 is local user
+                  if (v.uid === 0 && currentUserRef.current.uid) {
+                      authUid = currentUserRef.current.uid;
+                  }
+                  
+                  // Map Auth UID -> Display ID (seat.userId)
+                  const viewer = viewersRef.current.find(u => u.uid === authUid);
+                  if (viewer) {
+                      speaking.add(viewer.id);
+                  } else if (authUid === currentUserRef.current.uid) {
+                      // Fallback for self
+                      speaking.add(currentUserRef.current.id);
+                  } else {
+                      // Just in case Display ID was used as UID (unlikely but safe)
+                      speaking.add(authUid);
+                  }
+              }
+          });
+          setSpeakingUsers(speaking);
+      });
+      return () => listenToVolume(() => {});
+  }, []);
 
   // --- SEND JOIN MESSAGE ON MOUNT ---
   useEffect(() => {
@@ -649,42 +685,55 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
             </div>
         </div>
         <div className="flex gap-1.5 shrink-0 items-center">
-            <button onClick={() => setShowLeaderboard(true)} className="bg-yellow-500/20 backdrop-blur px-2 py-1.5 rounded-full text-[10px] font-black text-yellow-400 border border-yellow-500/50 flex gap-1"><Trophy className="w-3 h-3"/> {t('cup')}</button>
             {canManageRoom && <button onClick={() => setShowRoomSettings(true)} className="p-1.5 bg-white/10 rounded-full text-white"><Settings className="w-4 h-4" /></button>}
             <button onClick={() => setShowUserList(true)} className="bg-white/10 backdrop-blur px-2 py-1.5 rounded-full text-[10px] font-bold text-white flex items-center gap-1"><Users className="w-3 h-3" /> {viewers.length}</button>
         </div>
       </div>
 
+      {/* Moved Cup Button - Positioned absolutely under the back arrow */}
+      <button 
+        onClick={() => setShowLeaderboard(true)} 
+        className="absolute top-[65px] z-40 rtl:right-3 ltr:left-3 bg-yellow-500/20 backdrop-blur px-2 py-1.5 rounded-full text-[10px] font-black text-yellow-400 border border-yellow-500/50 flex gap-1 shadow-lg"
+      >
+        <Trophy className="w-3 h-3"/> {t('cup')}
+      </button>
+
       {/* 3. MIC GRID - Shrink 0 to prevent collapse */}
       <div className="relative z-10 w-full px-2 pt-2 pb-2 shrink-0 flex flex-col items-center">
           {/* Host (Index 0) */}
           <div className="flex justify-center mb-4 shrink-0">
-             {seats.slice(0, 1).map((seat) => (
+             {seats.slice(0, 1).map((seat) => {
+                 const isSpeaking = seat.userId && speakingUsers.has(seat.userId);
+                 return (
                  <div key={seat.index} className="flex flex-col items-center relative group">
                     <div onClick={() => handleSeatClick(seat.index, seat.userId)} className={`w-20 h-20 rounded-full relative bg-black/40 backdrop-blur overflow-visible cursor-pointer transition transform hover:scale-105 p-[3px] ${seat.userId ? getFrameClass(seat.frameId) : 'border-2 border-white/20 border-dashed'}`}>
                          {loadingSeatIndex === seat.index ? <Loader2 className="w-8 h-8 text-brand-500 animate-spin absolute inset-0 m-auto" /> : seat.userId ? (
-                             <><img src={seat.userAvatar!} className="w-full h-full rounded-full object-cover" />{!seat.isMuted && <div className="absolute inset-0 rounded-full border-2 border-brand-400 animate-ping opacity-50"></div>}{seat.isMuted && <div className="absolute inset-0 rounded-full bg-black/50 flex items-center justify-center"><MicOff className="w-5 h-5 text-red-500"/></div>}<div className="absolute -top-3 -right-1 bg-yellow-500 p-1 rounded-full"><Crown className="w-3 h-3 text-black" /></div></>
+                             <><img src={seat.userAvatar!} className="w-full h-full rounded-full object-cover" />{!seat.isMuted && isSpeaking && <div className="absolute inset-0 rounded-full border-2 border-brand-400 animate-ping opacity-50"></div>}{seat.isMuted && <div className="absolute inset-0 rounded-full bg-black/50 flex items-center justify-center"><MicOff className="w-5 h-5 text-red-500"/></div>}<div className="absolute -top-3 -right-1 bg-yellow-500 p-1 rounded-full"><Crown className="w-3 h-3 text-black" /></div></>
                          ) : <div className="text-gray-400 text-[10px] text-center w-full h-full flex items-center justify-center">{t('host')}</div>}
                     </div>
                     {seat.userId && <div className="mt-1 max-w-[70px] truncate text-[9px] text-white/90 bg-white/10 px-2 py-0.5 rounded-full">{seat.userName}</div>}
                     <div className="mt-0.5 bg-black/50 backdrop-blur px-2 py-0.5 rounded-full text-[8px] text-yellow-300 border border-yellow-500/30 flex items-center gap-1"><GiftIcon className="w-2 h-2" /> {seat.giftCount}</div>
                  </div>
-             ))}
+                 )
+             })}
           </div>
           
           {/* Guests (Indices 1-10) - 2 Rows of 5 */}
           <div className="grid grid-cols-5 gap-y-4 gap-x-2 justify-items-center w-full max-w-md shrink-0">
-             {seats.slice(1).map((seat) => (
+             {seats.slice(1).map((seat) => {
+                 const isSpeaking = seat.userId && speakingUsers.has(seat.userId);
+                 return (
                  <div key={seat.index} className="flex flex-col items-center w-full relative">
                     <div onClick={() => handleSeatClick(seat.index, seat.userId)} className={`w-14 h-14 rounded-full relative bg-black/30 backdrop-blur p-[2px] ${seat.userId ? getFrameClass(seat.frameId) : 'border border-white/10 border-dashed'} flex items-center justify-center`}>
                         {loadingSeatIndex === seat.index ? <Loader2 className="w-6 h-6 text-brand-500 animate-spin" /> : seat.userId ? (
-                            <><img src={seat.userAvatar!} className="w-full h-full rounded-full object-cover" />{!seat.isMuted && <div className="absolute inset-0 rounded-full border border-green-400 animate-ping opacity-40"></div>}{seat.isMuted && <div className="absolute inset-0 rounded-full bg-black/50 flex items-center justify-center"><MicOff className="w-4 h-4 text-red-500"/></div>}</>
+                            <><img src={seat.userAvatar!} className="w-full h-full rounded-full object-cover" />{!seat.isMuted && isSpeaking && <div className="absolute inset-0 rounded-full border border-green-400 animate-ping opacity-40"></div>}{seat.isMuted && <div className="absolute inset-0 rounded-full bg-black/50 flex items-center justify-center"><MicOff className="w-4 h-4 text-red-500"/></div>}</>
                         ) : (seat.isLocked ? <Lock className="w-4 h-4 text-red-400/70" /> : <span className="text-white/20 text-[10px] font-bold">{seat.index}</span>)}
                     </div>
                     <div className="mt-1 max-w-[65px] truncate text-[8px] text-white/90 bg-white/10 px-2 py-0.5 rounded-full">{seat.userId ? seat.userName : (seat.isLocked ? t('lock') : '')}</div>
                     <div className="mt-0.5 text-[7px] text-yellow-500 font-mono flex items-center gap-0.5">{seat.giftCount > 0 && <><GiftIcon className="w-2 h-2"/> {seat.giftCount}</>}</div>
                  </div>
-             ))}
+                 )
+             })}
           </div>
 
           {/* ACTIVE SPEAKERS BAR */}

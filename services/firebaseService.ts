@@ -155,6 +155,34 @@ export const deleteAllRooms = async () => {
   await batch.commit();
 };
 
+export const resetAllGhostUsers = async () => {
+  const roomsSnap = await getDocs(collection(db, 'rooms'));
+  const batch = writeBatch(db);
+  
+  // Create clean empty seats array
+  const emptySeats = Array(11).fill(null).map((_, i) => ({ 
+      index: i, 
+      userId: null, 
+      userName: null, 
+      userAvatar: null, 
+      isMuted: false, 
+      isLocked: false, 
+      giftCount: 0,
+      frameId: null,
+      adminRole: null
+  }));
+
+  roomsSnap.docs.forEach(doc => {
+      // Force reset seats and viewer count for every room
+      batch.update(doc.ref, { 
+          seats: emptySeats,
+          viewerCount: 0
+      });
+  });
+  
+  await batch.commit();
+};
+
 export const syncRoomIdsWithUserIds = async () => {
   const roomsSnap = await getDocs(collection(db, 'rooms'));
   const batch = writeBatch(db);

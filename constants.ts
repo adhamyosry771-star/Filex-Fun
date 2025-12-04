@@ -53,18 +53,20 @@ export const CHARM_ICONS = [
 ];
 
 export const ROOM_BACKGROUNDS = [
-  'https://images.unsplash.com/photo-1566008885218-40bdb64a663e?q=80&w=800&auto=format&fit=crop', 
-  'https://images.unsplash.com/photo-1492144534655-ae79c964c9d7?q=80&w=800&auto=format&fit=crop', 
-  'https://images.unsplash.com/photo-1580273916550-e323be2ae537?q=80&w=800&auto=format&fit=crop', 
-  'https://images.unsplash.com/photo-1605559424843-9e4c228bf1c2?q=80&w=800&auto=format&fit=crop', 
-  'https://images.unsplash.com/photo-1472214103451-9374bd1c798e?q=80&w=800&auto=format&fit=crop', 
-  'https://images.unsplash.com/photo-1441974231531-c6227db76b6e?q=80&w=800&auto=format&fit=crop', 
-  'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?q=80&w=800&auto=format&fit=crop', 
-  'https://images.unsplash.com/photo-1519681393798-3828fb4090bb?q=80&w=800&auto=format&fit=crop', 
-  'https://images.unsplash.com/photo-1518173946687-a4c8892bbd9f?q=80&w=800&auto=format&fit=crop', 
-  'https://images.unsplash.com/photo-1528722828814-77b9b8a90204?q=80&w=800&auto=format&fit=crop', 
-  'https://images.unsplash.com/photo-1534067783741-514d4dddb79e?q=80&w=800&auto=format&fit=crop', 
-  'https://images.unsplash.com/photo-1557683316-973673baf926?q=80&w=800&auto=format&fit=crop', 
+  // 1. Car (Luxury/Modern) - خلفية عربيه
+  'https://images.unsplash.com/photo-1617788138017-80ad40651399?auto=format&fit=crop&w=800&q=80',
+  
+  // 2. Music (Studio/Vibe) - خلفية موسيقى
+  'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?auto=format&fit=crop&w=800&q=80',
+  
+  // 3. New York City - أجواء نيويورك
+  'https://images.unsplash.com/photo-1496442226666-8d4d0e62e6e9?auto=format&fit=crop&w=800&q=80',
+  
+  // 4. Space & Planets - فضاء وكواكب
+  'https://images.unsplash.com/photo-1451187580459-43490279c0fa?auto=format&fit=crop&w=800&q=80',
+  
+  // 5. Mountains (Nature) - جبال
+  'https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?auto=format&fit=crop&w=800&q=80',
 ];
 
 export const GAMES: Game[] = [

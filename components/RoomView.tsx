@@ -6,6 +6,7 @@ import { GIFTS, STORE_ITEMS, ROOM_BACKGROUNDS, VIP_TIERS, ADMIN_ROLES } from '..
 import { listenToMessages, sendMessage, takeSeat, leaveSeat, updateRoomDetails, sendGiftTransaction, toggleSeatLock, toggleSeatMute, decrementViewerCount, listenToRoom, kickUserFromSeat, banUserFromRoom, unbanUserFromRoom, removeRoomAdmin, addRoomAdmin, searchUserByDisplayId, enterRoom, exitRoom, listenToRoomViewers } from '../services/firebaseService';
 import { joinVoiceChannel, leaveVoiceChannel, toggleMicMute, publishMicrophone, unpublishMicrophone, toggleAllRemoteAudio, listenToVolume } from '../services/agoraService';
 import { generateAiHostResponse } from '../services/geminiService';
+import { compressImage } from '../services/imageService';
 import UserProfileModal from './UserProfileModal';
 import RoomLeaderboard from './RoomLeaderboard';
 import FullProfileView from './FullProfileView';
@@ -567,16 +568,22 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
       toggleAllRemoteAudio(newState);
   };
 
-  const handleBgUpload = (e: React.ChangeEvent<HTMLInputElement>, type: 'inner' | 'outer') => {
+  const handleBgUpload = async (e: React.ChangeEvent<HTMLInputElement>, type: 'inner' | 'outer') => {
       const file = e.target.files?.[0];
       if (file) {
-          const reader = new FileReader();
-          reader.onloadend = () => {
-             if (typeof reader.result === 'string') {
-                 type === 'inner' ? handleUpdateRoom({ backgroundImage: reader.result }) : handleUpdateRoom({ thumbnail: reader.result });
-             }
-          };
-          reader.readAsDataURL(file);
+          try {
+              // Use higher resolution (1280) and quality (0.8) for better detail
+              // while still compressing to fit within Firestore limits.
+              const compressed = await compressImage(file, 1280, 0.8);
+              if (type === 'inner') {
+                  handleUpdateRoom({ backgroundImage: compressed });
+              } else {
+                  handleUpdateRoom({ thumbnail: compressed });
+              }
+          } catch (error) {
+              console.error("Image processing failed", error);
+              alert(language === 'ar' ? "فشل معالجة الصورة. يرجى اختيار صورة أخرى." : "Image processing failed. Please try another image.");
+          }
       }
   };
 
@@ -660,9 +667,13 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
   return (
     <div className="relative h-[100dvh] w-full bg-black flex flex-col overflow-hidden">
       
-      <div className="absolute inset-0 z-0">
-        <img src={room.backgroundImage || room.thumbnail} className="w-full h-full object-cover transition-opacity duration-700" />
-        <div className="absolute inset-0 bg-gradient-to-b from-black/60 via-black/20 to-black/90"></div>
+      <div className="absolute inset-0 z-0 bg-gray-900">
+        <img 
+          src={room.backgroundImage || room.thumbnail} 
+          className="w-full h-full object-cover object-center opacity-100 transition-opacity duration-700" 
+        />
+        {/* Adjusted Gradient Overlay: Lighter top and middle to show details clearly */}
+        <div className="absolute inset-0 bg-gradient-to-b from-black/5 via-transparent to-black/60"></div>
       </div>
 
       {activeAnimations.map(anim => (

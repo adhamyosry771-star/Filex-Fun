@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
-import { Shield, Trash2, Ban, Search, Gift, Crown, ArrowLeft, RefreshCw, CheckCircle, Megaphone, Edit3, Send, Home, XCircle, Flame, Image as ImageIcon, Plus, X, Database, Clock, Gamepad2, BadgeCheck, Coins, Trophy } from 'lucide-react';
-import { getAllUsers, adminUpdateUser, deleteAllRooms, sendSystemNotification, broadcastOfficialMessage, searchUserByDisplayId, getRoomsByHostId, adminBanRoom, deleteRoom, toggleRoomHotStatus, toggleRoomActivitiesStatus, addBanner, deleteBanner, listenToBanners, syncRoomIdsWithUserIds, toggleRoomOfficialStatus, resetAllUsersCoins, resetAllRoomCups } from '../services/firebaseService';
+import { Shield, Trash2, Ban, Search, Gift, Crown, ArrowLeft, RefreshCw, CheckCircle, Megaphone, Edit3, Send, Home, XCircle, Flame, Image as ImageIcon, Plus, X, Database, Clock, Gamepad2, BadgeCheck, Coins, Trophy, Ghost } from 'lucide-react';
+import { getAllUsers, adminUpdateUser, deleteAllRooms, sendSystemNotification, broadcastOfficialMessage, searchUserByDisplayId, getRoomsByHostId, adminBanRoom, deleteRoom, toggleRoomHotStatus, toggleRoomActivitiesStatus, addBanner, deleteBanner, listenToBanners, syncRoomIdsWithUserIds, toggleRoomOfficialStatus, resetAllUsersCoins, resetAllRoomCups, resetAllGhostUsers } from '../services/firebaseService';
 import { Language, User, Room, Banner } from '../types';
 import { VIP_TIERS, ADMIN_ROLES } from '../constants';
 
@@ -407,6 +407,18 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, language }) => 
       setActionLoading(null);
   };
 
+  const handleResetGhostUsers = async () => {
+      if (!confirm("هل أنت متأكد من تنظيف جميع الحسابات المعلقة؟ سيتم إخراج جميع المستخدمين من المايكات وتصفير عداد المتصلين في كل الرومات.")) return;
+      setActionLoading('reset_ghosts');
+      try {
+          await resetAllGhostUsers();
+          alert("تم تنظيف الحسابات المعلقة بنجاح!");
+      } catch (e) {
+          alert("حدث خطأ أثناء التنظيف");
+      }
+      setActionLoading(null);
+  };
+
   const handleAddBanner = async () => {
       if (!newBannerImage) return;
       setActionLoading('add_banner');
@@ -486,18 +498,18 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, language }) => 
   return (
     <div dir="rtl" className="h-full bg-black text-gold-400 flex flex-col font-sans relative">
       {/* Header */}
-      <div className="p-4 bg-gray-900 border-b border-gold-500/30 flex items-center justify-between shadow-lg relative overflow-hidden">
-        <div className="absolute inset-0 bg-gradient-to-l from-gold-500/10 to-transparent"></div>
-        <div className="flex items-center gap-3 relative z-10">
+      <div className="p-4 bg-gray-900 border-b border-gold-500/30 flex items-center gap-4 shadow-lg relative overflow-hidden shrink-0">
+        <div className="absolute inset-0 bg-gradient-to-l from-gold-500/10 to-transparent pointer-events-none"></div>
+        <div className="flex items-center gap-3 relative z-10 shrink-0">
             <button onClick={onBack} className="p-2 rounded-full hover:bg-white/10 text-gold-400">
                 <ArrowLeft className="w-5 h-5" />
             </button>
-            <h1 className="text-xl font-bold flex items-center gap-2 text-gold-100">
+            <h1 className="text-xl font-bold flex items-center gap-2 text-gold-100 whitespace-nowrap">
                 <Shield className="w-6 h-6 text-gold-500" />
                 لوحة التحكم
             </h1>
         </div>
-        <div className="flex gap-2 relative z-10 overflow-x-auto max-w-[200px] scrollbar-hide">
+        <div className="flex gap-2 relative z-10 overflow-x-auto flex-1 scrollbar-hide">
             <button 
                 onClick={() => setActiveTab('users')}
                 className={`px-3 py-1 rounded border border-gold-500/30 text-[10px] font-bold whitespace-nowrap ${activeTab === 'users' ? 'bg-gold-500 text-black' : 'text-gold-500'}`}
@@ -817,7 +829,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, language }) => 
       )}
 
       {activeTab === 'system' && (
-          <div className="flex-1 p-8 flex flex-col items-center justify-center space-y-4">
+          <div className="flex-1 p-6 flex flex-col items-center overflow-y-auto space-y-6">
               <div className="bg-red-900/10 p-6 rounded-2xl border border-red-900/50 max-w-sm w-full text-center">
                   <Trash2 className="w-16 h-16 text-red-500 mx-auto mb-4" />
                   <h2 className="text-xl font-bold text-red-500 mb-2">منطقة الخطر</h2>
@@ -825,6 +837,11 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, language }) => 
                   <div className="space-y-3">
                       <button onClick={() => handleDeleteRooms()} disabled={actionLoading === 'system'} className="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-3 rounded-lg mt-4">
                           {actionLoading === 'system' ? 'جاري الحذف...' : 'حذف جميع الرومات'}
+                      </button>
+
+                      <button onClick={handleResetGhostUsers} disabled={actionLoading === 'reset_ghosts'} className="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2">
+                          <Ghost className="w-5 h-5"/>
+                          {actionLoading === 'reset_ghosts' ? 'جاري التنظيف...' : 'تنظيف الحسابات المعلقة'}
                       </button>
 
                       <button onClick={handleResetAllCoins} disabled={actionLoading === 'reset_coins'} className="w-full bg-orange-600 hover:bg-orange-700 text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2">

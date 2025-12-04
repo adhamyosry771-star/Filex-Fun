@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { X, User as UserIcon, MessageSquare, Gift, BadgeCheck, Loader2, Shield, MicOff, Ban, UserCog, UserMinus, Maximize2 } from 'lucide-react';
+import { X, User as UserIcon, MessageSquare, Gift, BadgeCheck, Loader2, Shield, MicOff, Ban, UserCog, UserMinus, Maximize2, ArrowDownToLine } from 'lucide-react';
 import { User, Language, RoomSeat } from '../types';
 import { searchUserByDisplayId, getUserProfile } from '../services/firebaseService';
 import { LEVEL_ICONS, CHARM_ICONS, ADMIN_ROLES } from '../constants';
@@ -15,11 +15,12 @@ interface UserProfileModalProps {
   onBanUser?: () => void;
   onMakeAdmin?: () => void;
   onRemoveAdmin?: () => void;
+  onLeaveSeat?: () => void;
   onOpenFullProfile: (user: User) => void;
   language: Language;
 }
 
-const UserProfileModal: React.FC<UserProfileModalProps> = ({ user, currentUser, onClose, onMessage, onGift, onKickSeat, onBanUser, onMakeAdmin, onRemoveAdmin, onOpenFullProfile, language }) => {
+const UserProfileModal: React.FC<UserProfileModalProps> = ({ user, currentUser, onClose, onMessage, onGift, onKickSeat, onBanUser, onMakeAdmin, onRemoveAdmin, onLeaveSeat, onOpenFullProfile, language }) => {
   const [fullProfile, setFullProfile] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
@@ -89,7 +90,8 @@ const UserProfileModal: React.FC<UserProfileModalProps> = ({ user, currentUser, 
       kickSeat: { ar: 'طرد من المايك', en: 'Kick Seat' },
       banRoom: { ar: 'حظر من الروم', en: 'Ban Room' },
       makeAdmin: { ar: 'تعيين مشرف', en: 'Make Admin' },
-      removeAdmin: { ar: 'إزالة مشرف', en: 'Remove Admin' }
+      removeAdmin: { ar: 'إزالة مشرف', en: 'Remove Admin' },
+      leaveSeat: { ar: 'نزول من المايك', en: 'Leave Seat' }
     };
     return dict[key][language];
   };
@@ -120,6 +122,17 @@ const UserProfileModal: React.FC<UserProfileModalProps> = ({ user, currentUser, 
         <button onClick={onClose} className="absolute top-4 right-4 z-20 p-2 bg-black/30 rounded-full text-white hover:bg-black/50">
           <X className="w-5 h-5" />
         </button>
+
+        {/* Leave Seat Button - Small icon bottom right */}
+        {isProfileMe && onLeaveSeat && (
+            <button 
+                onClick={onLeaveSeat}
+                className="absolute bottom-4 right-4 z-20 w-9 h-9 flex items-center justify-center bg-red-500/10 border border-red-500 text-red-500 rounded-full hover:bg-red-500 hover:text-white transition-all duration-300 shadow-lg"
+                title={t('leaveSeat')}
+            >
+                <ArrowDownToLine className="w-4 h-4" />
+            </button>
+        )}
 
         {/* Cover / Header */}
         <div className="h-32 bg-gradient-to-r from-brand-600 to-accent-600 relative"></div>

@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
-import { UserCircle, MapPin, Calendar, Check, Camera } from 'lucide-react';
+import { UserCircle, MapPin, Calendar, Check, Camera, Globe, ArrowLeft, Search, X } from 'lucide-react';
 import { Language } from '../types';
 import AvatarSelector from './AvatarSelector';
-import { DEFAULT_AVATARS } from '../constants';
+import { DEFAULT_AVATARS, COUNTRIES } from '../constants';
 
 interface InfoViewProps {
   onComplete: (data: { name: string; country: string; age: string; gender: 'male' | 'female', avatar: string }) => void;
@@ -16,6 +16,10 @@ const InfoView: React.FC<InfoViewProps> = ({ onComplete, language }) => {
   const [gender, setGender] = useState<'male' | 'female'>('male');
   const [avatarPreview, setAvatarPreview] = useState(DEFAULT_AVATARS[0]);
   const [showAvatarSelector, setShowAvatarSelector] = useState(false);
+  
+  // Country Selector
+  const [showCountrySelector, setShowCountrySelector] = useState(false);
+  const [countrySearch, setCountrySearch] = useState('');
 
   const t = (key: string) => {
     const dict: Record<string, { ar: string, en: string }> = {
@@ -29,7 +33,8 @@ const InfoView: React.FC<InfoViewProps> = ({ onComplete, language }) => {
       gender: { ar: 'الجنس', en: 'Gender' },
       male: { ar: 'ذكر', en: 'Male' },
       female: { ar: 'أنثى', en: 'Female' },
-      start: { ar: 'ابدأ الآن', en: 'Start Now' }
+      start: { ar: 'ابدأ الآن', en: 'Start Now' },
+      searchCountry: { ar: 'بحث عن دولة...', en: 'Search country...' }
     };
     return dict[key][language];
   };
@@ -39,6 +44,13 @@ const InfoView: React.FC<InfoViewProps> = ({ onComplete, language }) => {
       onComplete({ name, country, age, gender, avatar: avatarPreview });
     }
   };
+
+  const filteredCountries = COUNTRIES.filter(c => 
+      c.name.ar.includes(countrySearch) || 
+      c.name.en.toLowerCase().includes(countrySearch.toLowerCase())
+  );
+
+  const selectedCountryData = COUNTRIES.find(c => c.name.ar === country || c.name.en === country);
 
   return (
     <div className="relative h-screen w-full bg-gray-900 flex flex-col items-center justify-center font-sans overflow-hidden">
@@ -87,25 +99,26 @@ const InfoView: React.FC<InfoViewProps> = ({ onComplete, language }) => {
             />
           </div>
 
-          {/* Country */}
-          <div className="bg-white/5 backdrop-blur border border-white/10 rounded-xl px-4 py-3 focus-within:border-brand-500 transition flex items-center gap-2">
+          {/* Country Selector Trigger */}
+          <div 
+            onClick={() => setShowCountrySelector(true)}
+            className="bg-white/5 backdrop-blur border border-white/10 rounded-xl px-4 py-3 focus-within:border-brand-500 transition flex items-center gap-2 cursor-pointer hover:bg-white/10"
+          >
              <MapPin className="w-5 h-5 text-gray-500" />
              <div className="flex-1">
                 <label className={`block text-[10px] text-gray-400 uppercase tracking-wider mb-1 ${language === 'ar' ? 'text-right' : 'text-left'}`}>
                   {t('country')}
                 </label>
-                <select 
-                    value={country} 
-                    onChange={(e) => setCountry(e.target.value)}
-                    className={`w-full bg-transparent border-none outline-none text-white appearance-none ${language === 'ar' ? 'text-right' : 'text-left'}`}
-                >
-                    <option value="" className="bg-gray-800 text-gray-500">{t('chooseCountry')}</option>
-                    <option value="Egypt" className="bg-gray-800">Egypt 🇪🇬</option>
-                    <option value="KSA" className="bg-gray-800">KSA 🇸🇦</option>
-                    <option value="UAE" className="bg-gray-800">UAE 🇦🇪</option>
-                    <option value="Morocco" className="bg-gray-800">Morocco 🇲🇦</option>
-                    <option value="Other" className="bg-gray-800">Other 🌍</option>
-                </select>
+                <div className={`w-full flex items-center gap-2 ${language === 'ar' ? 'flex-row-reverse' : 'flex-row'}`}>
+                    {selectedCountryData ? (
+                        <>
+                            <span className="text-xl">{selectedCountryData.flag}</span>
+                            <span className="text-white font-medium">{selectedCountryData.name[language]}</span>
+                        </>
+                    ) : (
+                        <span className="text-gray-500">{t('chooseCountry')}</span>
+                    )}
+                </div>
              </div>
           </div>
 
@@ -161,6 +174,52 @@ const InfoView: React.FC<InfoViewProps> = ({ onComplete, language }) => {
         </button>
 
       </div>
+
+      {showCountrySelector && (
+          <div className="fixed inset-0 z-[80] bg-gray-900 flex flex-col animate-in slide-in-from-bottom-10">
+              <div className="p-4 bg-gray-800 flex items-center gap-3 border-b border-gray-700">
+                  <button onClick={() => setShowCountrySelector(false)} className="p-2 bg-gray-700 rounded-full text-white">
+                      <ArrowLeft className="w-5 h-5 rtl:rotate-180" />
+                  </button>
+                  <h2 className="text-white font-bold flex-1">{t('chooseCountry')}</h2>
+              </div>
+              
+              <div className="p-4 bg-gray-900 sticky top-0 z-10 border-b border-gray-800">
+                  <div className="relative">
+                      <Search className="absolute top-3 left-4 rtl:right-4 rtl:left-auto text-gray-500 w-5 h-5" />
+                      <input 
+                          type="text" 
+                          placeholder={t('searchCountry')} 
+                          value={countrySearch}
+                          onChange={(e) => setCountrySearch(e.target.value)}
+                          className="w-full bg-gray-800 border border-gray-700 rounded-xl py-3 px-12 text-white focus:border-brand-500 outline-none"
+                      />
+                      {countrySearch && (
+                          <button onClick={() => setCountrySearch('')} className="absolute top-3 right-4 rtl:left-4 rtl:right-auto text-gray-500">
+                              <X className="w-5 h-5" />
+                          </button>
+                      )}
+                  </div>
+              </div>
+
+              <div className="flex-1 overflow-y-auto p-2">
+                  {filteredCountries.map((c) => (
+                      <div 
+                          key={c.code}
+                          onClick={() => {
+                              setCountry(c.name[language]);
+                              setShowCountrySelector(false);
+                          }}
+                          className={`flex items-center gap-4 p-4 rounded-xl cursor-pointer hover:bg-white/5 transition border-b border-white/5 ${country === c.name[language] ? 'bg-brand-900/20 border-brand-500/30' : ''}`}
+                      >
+                          <span className="text-4xl drop-shadow-md">{c.flag}</span>
+                          <span className="text-white font-bold text-lg">{c.name[language]}</span>
+                          {country === c.name[language] && <div className="ml-auto bg-brand-500 w-2 h-2 rounded-full"></div>}
+                      </div>
+                  ))}
+              </div>
+          </div>
+      )}
 
       {showAvatarSelector && (
           <AvatarSelector 

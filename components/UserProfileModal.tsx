@@ -1,6 +1,5 @@
-
 import React, { useState, useEffect } from 'react';
-import { X, User as UserIcon, MessageSquare, Gift, BadgeCheck, Loader2, Shield, MicOff, Ban, UserCog, UserMinus, Maximize2, ArrowDownToLine } from 'lucide-react';
+import { X, User as UserIcon, MessageSquare, Gift, BadgeCheck, Loader2, Shield, MicOff, Ban, UserCog, UserMinus, Maximize2, ArrowDownToLine, Globe, Calendar, Mars, Venus } from 'lucide-react';
 import { User, Language, RoomSeat } from '../types';
 import { searchUserByDisplayId, getUserProfile } from '../services/firebaseService';
 import { LEVEL_ICONS, CHARM_ICONS, ADMIN_ROLES } from '../constants';
@@ -57,12 +56,13 @@ const UserProfileModal: React.FC<UserProfileModalProps> = ({ user, currentUser, 
   }, [user, targetId]);
 
   // Use fetched profile if available, else fallback to initial props
-  const displayUser = fullProfile || user;
+  const displayUser: any = fullProfile || user; // Cast to any to access potentially missing properties
   const displayName = 'name' in displayUser ? displayUser.name : (displayUser as any).userName || initialUserName;
   const displayAvatar = 'avatar' in displayUser ? displayUser.avatar : (displayUser as any).userAvatar || initialUserAvatar;
   const displayId = 'id' in displayUser ? displayUser.id : targetId;
   const adminRole = fullProfile ? fullProfile.adminRole : (user as any).adminRole;
   const isProfileMe = fullProfile ? fullProfile.uid === currentUser.uid : (currentUser.id === displayId);
+  const displayBio = fullProfile?.bio;
 
   // Level Logic
   const getLevel = (amount: number = 0) => {
@@ -160,6 +160,10 @@ const UserProfileModal: React.FC<UserProfileModalProps> = ({ user, currentUser, 
             </h2>
             <p className="text-gray-400 text-sm font-mono mt-1">ID: {displayId}</p>
 
+            {displayBio && (
+                <p className="text-gray-300 text-xs mt-2 text-center italic max-w-[90%]">"{displayBio}"</p>
+            )}
+
             {/* Badges / Levels Container */}
             <div className="flex flex-col items-center gap-2 mt-3 w-full">
                 {isLoading ? (
@@ -189,6 +193,25 @@ const UserProfileModal: React.FC<UserProfileModalProps> = ({ user, currentUser, 
                                 <Shield className="w-3 h-3" />
                                 {ADMIN_ROLES[adminRole].name[language]}
                             </div>
+                        )}
+
+                        {/* Row 3: Age & Country Badges (New Addition) */}
+                        {(displayUser.country || displayUser.age) && (
+                             <div className="flex items-center justify-center gap-2 mt-1 w-full animate-in fade-in slide-in-from-bottom-1">
+                                 {displayUser.country && (
+                                     <div className="bg-white/5 px-2 py-1 rounded-full flex items-center gap-1 text-[10px] font-bold text-gray-300 border border-white/5">
+                                         {/\p{Emoji}/u.test(displayUser.country) ? '' : <Globe className="w-3 h-3 text-blue-400" />}
+                                         <span>{displayUser.country}</span>
+                                     </div>
+                                 )}
+                                 
+                                 {displayUser.age && (
+                                     <div className={`bg-white/5 px-2 py-1 rounded-full flex items-center gap-1 text-[10px] font-bold text-gray-300 border border-white/5 ${displayUser.gender === 'female' ? 'border-pink-500/20' : 'border-blue-500/20'}`}>
+                                         {displayUser.gender === 'female' ? <Venus className="w-3 h-3 text-pink-400" /> : displayUser.gender === 'male' ? <Mars className="w-3 h-3 text-blue-400" /> : <Calendar className="w-3 h-3 text-gray-400" />}
+                                         <span>{displayUser.age}</span>
+                                     </div>
+                                 )}
+                             </div>
                         )}
                     </>
                 )}

@@ -1,3 +1,4 @@
+
 import React, { useState } from 'react';
 import { X, Upload, Image as ImageIcon, Camera } from 'lucide-react';
 import { DEFAULT_AVATARS } from '../constants';
@@ -44,7 +45,7 @@ const AvatarSelector: React.FC<AvatarSelectorProps> = ({ currentAvatar, onSelect
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in">
+    <div className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in">
       <div className="w-full max-w-md bg-gray-900 border border-gray-700 rounded-3xl overflow-hidden shadow-2xl relative">
         
         {/* Header */}

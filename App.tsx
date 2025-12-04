@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { Home, Trophy, User as UserIcon, Users, PlusCircle, Copy, MessageSquare, Loader2, ChevronRight, Crown, ShoppingBag, Wallet as WalletIcon, Settings, Gem, Coins, Edit3, Zap, X, Trash2, Shield, Info, Smartphone, Star, Gamepad2, BadgeCheck, Database } from 'lucide-react';
+import { Home, Trophy, User as UserIcon, Users, PlusCircle, Copy, MessageSquare, Loader2, ChevronRight, Crown, ShoppingBag, Wallet as WalletIcon, Settings, Gem, Coins, Edit3, Zap, X, Trash2, Shield, Info, Smartphone, Star, Gamepad2, BadgeCheck, Database, PenBox, Globe, Calendar, Mars, Venus } from 'lucide-react';
 import HomeView from './components/HomeView';
 import { RoomView } from './components/RoomView';
 import LoginView from './components/LoginView';
@@ -16,6 +16,7 @@ import AdminDashboard from './components/AdminDashboard';
 import SearchView from './components/SearchView';
 import PrivateChatView from './components/PrivateChatView';
 import AgencyView from './components/AgencyView';
+import EditProfileModal from './components/EditProfileModal';
 import { ViewState, Room, User, Language, PrivateChatSummary } from './types';
 import { auth } from './firebaseConfig';
 import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
@@ -36,6 +37,7 @@ const App: React.FC = () => {
   const [isGuest, setIsGuest] = useState(false);
   
   const [showAvatarEdit, setShowAvatarEdit] = useState(false);
+  const [showEditProfile, setShowEditProfile] = useState(false); // New State for Edit Modal
   const [showSettings, setShowSettings] = useState(false);
   const [showSupport, setShowSupport] = useState(false);
 
@@ -155,7 +157,8 @@ const App: React.FC = () => {
             country: data.country,
             age: parseInt(data.age),
             gender: data.gender,
-            avatar: data.avatar || authUser.photoURL || 'https://picsum.photos/seed/new/200/200'
+            avatar: data.avatar || authUser.photoURL || 'https://picsum.photos/seed/new/200/200',
+            bio: 'Welcome to my profile!'
         });
     } catch (e) {
         setUserProfile(CURRENT_USER);
@@ -195,10 +198,7 @@ const App: React.FC = () => {
   const handleRoomAction = async (action: 'minimize' | 'leave' | 'chat', data?: any) => {
       if (action === 'chat' && data) {
           await handleStartPrivateChat(data);
-          // Don't nullify activeRoom, just minimize it implicitly by changing view
           setMinimizedRoom(activeRoom); 
-          // Do NOT setActiveRoom(null) here, kept active in background
-          // But UI logic below handles visibility
       } else if (action === 'minimize') {
           setMinimizedRoom(activeRoom);
           setCurrentView(ViewState.HOME);
@@ -226,12 +226,10 @@ const App: React.FC = () => {
   };
 
   const handleMaximizeRoom = () => {
-      // If we have an active room in background (minimized implicitly or explicitly)
       if (activeRoom) {
           setMinimizedRoom(null);
           setCurrentView(ViewState.ROOM);
       } else if (minimizedRoom) {
-          // Legacy check if needed
           setActiveRoom(minimizedRoom);
           setMinimizedRoom(null);
           setCurrentView(ViewState.ROOM);
@@ -319,7 +317,6 @@ const App: React.FC = () => {
 
   const getIconByLevel = (level: number, type: 'wealth' | 'charm') => {
       const icons = type === 'wealth' ? LEVEL_ICONS : CHARM_ICONS;
-      // Find icon for current level range (e.g. 10-19 uses index for 10)
       const iconObj = [...icons].reverse().find(i => level >= i.min);
       return iconObj || icons[0];
   };
@@ -329,7 +326,6 @@ const App: React.FC = () => {
       case ViewState.HOME:
         return <HomeView rooms={rooms} onJoinRoom={handleJoinRoom} language={language} userProfile={userProfile} onSearch={() => setCurrentView(ViewState.SEARCH)} />;
       
-      // Note: RoomView is handled outside switch to persist state
       case ViewState.ROOM:
         return null; // Rendered in main wrapper
       
@@ -413,6 +409,15 @@ const App: React.FC = () => {
         return (
           <div className="h-full bg-gray-900 text-white overflow-y-auto pb-24 relative font-sans">
             <div className="relative pt-10 pb-12 px-4 flex flex-col items-center glass-card rounded-b-[3rem] mb-4 border-b border-white/5">
+                 
+                 {/* NEW: Edit Profile Button (Top Left) */}
+                 <button 
+                    onClick={() => setShowEditProfile(true)}
+                    className="absolute top-4 left-4 p-2.5 bg-white/10 rounded-xl border border-white/20 text-white hover:bg-white/20 transition shadow-lg backdrop-blur-md"
+                 >
+                    <PenBox className="w-5 h-5 text-white" />
+                 </button>
+
                  <button 
                     onClick={() => setShowSettings(true)}
                     className="absolute top-4 right-4 text-white p-2 rounded-full hover:bg-white/10"
@@ -420,7 +425,7 @@ const App: React.FC = () => {
                     <Settings className="w-6 h-6 text-brand-300" />
                  </button>
                  
-                 <div onClick={() => setShowAvatarEdit(true)} className="relative mb-3 group cursor-pointer z-10">
+                 <div onClick={() => setShowEditProfile(true)} className="relative mb-3 group cursor-pointer z-10">
                     <div className={`w-32 h-32 rounded-full relative p-[3px] ${frameClass}`}>
                         <img src={userProfile.avatar} className="w-full h-full rounded-full object-cover border-4 border-gray-900" alt="Profile" />
                     </div>
@@ -434,7 +439,14 @@ const App: React.FC = () => {
                     {isOfficial && <BadgeCheck className="w-5 h-5 text-blue-500 fill-white" />}
                  </h2>
 
-                 <div className="flex items-center gap-2 mt-1">
+                 {/* Bio Display */}
+                 {userProfile.bio && (
+                     <p className="text-sm text-gray-300 mt-1 max-w-[80%] text-center italic line-clamp-2">
+                         "{userProfile.bio}"
+                     </p>
+                 )}
+
+                 <div className="flex items-center gap-2 mt-2">
                     {adminRole && (
                        <div className={`text-[10px] font-bold px-3 py-0.5 rounded-full border ${ADMIN_ROLES[adminRole].class}`}>
                            {ADMIN_ROLES[adminRole].name[language]}
@@ -462,6 +474,26 @@ const App: React.FC = () => {
                         {t('id')}: {userProfile.id} <Copy className="w-3 h-3 cursor-pointer" />
                     </span>
                  </div>
+                 
+                 {/* Glass-morphism Age and Country Badges */}
+                 {(userProfile.country || userProfile.age) && (
+                     <div className="flex items-center justify-center gap-3 mt-4 w-full">
+                         {userProfile.country && (
+                             <div className="glass px-3 py-1.5 rounded-full flex items-center gap-2 text-xs font-bold text-white/90 shadow-sm border border-white/10">
+                                 {/* Check if text contains emoji flag, if not show Globe */}
+                                 {/\p{Emoji}/u.test(userProfile.country) ? '' : <Globe className="w-3.5 h-3.5 text-blue-400" />}
+                                 <span>{userProfile.country}</span>
+                             </div>
+                         )}
+                         
+                         {userProfile.age && (
+                             <div className={`glass px-3 py-1.5 rounded-full flex items-center gap-2 text-xs font-bold text-white/90 shadow-sm border border-white/10 ${userProfile.gender === 'female' ? 'border-pink-500/30' : 'border-blue-500/30'}`}>
+                                 {userProfile.gender === 'female' ? <Venus className="w-3.5 h-3.5 text-pink-400" /> : userProfile.gender === 'male' ? <Mars className="w-3.5 h-3.5 text-blue-400" /> : <Calendar className="w-3.5 h-3.5 text-gray-400" />}
+                                 <span>{userProfile.age}</span>
+                             </div>
+                         )}
+                     </div>
+                 )}
             </div>
 
             <div className="flex justify-around items-center w-full px-4 py-4 glass mb-4">
@@ -576,6 +608,15 @@ const App: React.FC = () => {
 
             {showAvatarEdit && <AvatarSelector currentAvatar={userProfile.avatar} language={language} onSelect={handleUpdateAvatar} onClose={() => setShowAvatarEdit(false)} />}
             
+            {showEditProfile && (
+                <EditProfileModal 
+                    user={userProfile}
+                    language={language}
+                    onClose={() => setShowEditProfile(false)}
+                    onUpdate={(updatedData) => setUserProfile({ ...userProfile, ...updatedData })}
+                />
+            )}
+
             {showSettings && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
                     <div className="w-full max-w-sm glass-card rounded-3xl overflow-hidden shadow-2xl">

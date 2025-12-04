@@ -1,6 +1,5 @@
-
 import React, { useEffect, useState } from 'react';
-import { X, Copy, Crown, Shield, Gift as GiftIcon, Loader2, BadgeCheck } from 'lucide-react';
+import { X, Copy, Crown, Shield, Gift as GiftIcon, Loader2, BadgeCheck, Globe, Calendar, Mars, Venus } from 'lucide-react';
 import { User, Language, Gift } from '../types';
 import { listenToUserProfile } from '../services/firebaseService';
 import { GIFTS, VIP_TIERS, ADMIN_ROLES, LEVEL_ICONS, CHARM_ICONS, STORE_ITEMS } from '../constants';
@@ -113,8 +112,24 @@ const FullProfileView: React.FC<FullProfileViewProps> = ({ user: initialUser, on
                     {isOfficial && <BadgeCheck className="w-6 h-6 text-blue-500 fill-white" />}
                 </div>
 
+                {/* ID Pill */}
+                <div className="z-10 mb-4">
+                    <span className={`px-4 py-1.5 rounded-full text-xs font-bold flex items-center gap-2 shadow-lg ${isCustomId ? 'bg-gradient-to-r from-yellow-600 to-yellow-400 text-black border border-yellow-200' : 'bg-white/10 text-gray-300 border border-white/10 backdrop-blur-md'}`}>
+                        <span className="opacity-70">{t('id')}:</span> 
+                        <span className="tracking-wider">{user.id}</span>
+                        <Copy className={`w-3 h-3 cursor-pointer ${isCustomId ? 'text-black/70' : 'text-gray-400'}`} onClick={() => alert('Copied!')}/>
+                    </span>
+                </div>
+
+                {/* Bio */}
+                {user.bio && (
+                    <div className="z-10 mb-6 max-w-sm">
+                        <p className="text-gray-300 text-sm text-center italic bg-white/5 px-4 py-2 rounded-xl border border-white/10">"{user.bio}"</p>
+                    </div>
+                )}
+
                 {/* Levels Row (Wealth & Charm) */}
-                <div className="flex items-center gap-3 mb-3 z-10">
+                <div className="flex items-center gap-3 mb-6 z-10">
                     {/* Wealth Badge */}
                     <div className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold text-white shadow-md border border-white/10 ${wealthBadge.color}`}>
                         <span>{wealthBadge.icon}</span>
@@ -128,14 +143,24 @@ const FullProfileView: React.FC<FullProfileViewProps> = ({ user: initialUser, on
                     </div>
                 </div>
 
-                {/* ID Pill */}
-                <div className="z-10 mb-6">
-                    <span className={`px-4 py-1.5 rounded-full text-xs font-bold flex items-center gap-2 shadow-lg ${isCustomId ? 'bg-gradient-to-r from-yellow-600 to-yellow-400 text-black border border-yellow-200' : 'bg-white/10 text-gray-300 border border-white/10 backdrop-blur-md'}`}>
-                        <span className="opacity-70">{t('id')}:</span> 
-                        <span className="tracking-wider">{user.id}</span>
-                        <Copy className={`w-3 h-3 cursor-pointer ${isCustomId ? 'text-black/70' : 'text-gray-400'}`} onClick={() => alert('Copied!')}/>
-                    </span>
-                </div>
+                {/* Age and Country Badges (New Section) */}
+                {(user.country || user.age) && (
+                     <div className="flex items-center justify-center gap-3 mb-6 z-10 animate-in fade-in slide-in-from-bottom-2">
+                         {user.country && (
+                             <div className="bg-white/10 backdrop-blur-md px-3 py-1.5 rounded-full flex items-center gap-2 text-xs font-bold text-white/90 shadow-sm border border-white/10">
+                                 {/\p{Emoji}/u.test(user.country) ? '' : <Globe className="w-3.5 h-3.5 text-blue-400" />}
+                                 <span>{user.country}</span>
+                             </div>
+                         )}
+                         
+                         {user.age && (
+                             <div className={`bg-white/10 backdrop-blur-md px-3 py-1.5 rounded-full flex items-center gap-2 text-xs font-bold text-white/90 shadow-sm border border-white/10 ${user.gender === 'female' ? 'border-pink-500/30' : 'border-blue-500/30'}`}>
+                                 {user.gender === 'female' ? <Venus className="w-3.5 h-3.5 text-pink-400" /> : user.gender === 'male' ? <Mars className="w-3.5 h-3.5 text-blue-400" /> : <Calendar className="w-3.5 h-3.5 text-gray-400" />}
+                                 <span>{user.age}</span>
+                             </div>
+                         )}
+                     </div>
+                )}
 
                 {/* Badges Drawer (Admin / VIP Only) */}
                 {(adminRole || vipInfo) && (

@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { Shield, Trash2, Ban, Search, Gift, Crown, ArrowLeft, RefreshCw, CheckCircle, Megaphone, Edit3, Send, Home, XCircle, Flame, Image as ImageIcon, Plus, X, Database, Clock, Gamepad2, BadgeCheck, Coins, Trophy, Ghost } from 'lucide-react';
+import { Shield, Trash2, Ban, Search, Gift, Crown, ArrowLeft, RefreshCw, CheckCircle, Megaphone, Edit3, Send, Home, XCircle, Flame, Image as ImageIcon, Plus, X, Database, Clock, Gamepad2, BadgeCheck, Coins, Trophy, Ghost, Lock, Unlock } from 'lucide-react';
 import { getAllUsers, adminUpdateUser, deleteAllRooms, sendSystemNotification, broadcastOfficialMessage, searchUserByDisplayId, getRoomsByHostId, adminBanRoom, deleteRoom, toggleRoomHotStatus, toggleRoomActivitiesStatus, addBanner, deleteBanner, listenToBanners, syncRoomIdsWithUserIds, toggleRoomOfficialStatus, resetAllUsersCoins, resetAllRoomCups, resetAllGhostUsers } from '../services/firebaseService';
 import { Language, User, Room, Banner } from '../types';
 import { VIP_TIERS, ADMIN_ROLES } from '../constants';
@@ -137,6 +137,27 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, language }) => 
           }
           await fetchUsers();
           alert("تم تحديث الرتبة");
+      } catch (e) {
+          alert("فشل التحديث");
+      }
+      setActionLoading(null);
+  };
+
+  // Toggle Room Creation Permission
+  const handleToggleRoomCreation = async (uid: string, currentStatus: boolean) => {
+      setActionLoading(uid);
+      try {
+          await adminUpdateUser(uid, { canCreateRoom: !currentStatus });
+          
+          if (!currentStatus) {
+              await sendSystemNotification(uid, "System", "مبرك لقد تم فتح ميزة انشاء الغرفه");
+          }
+
+          if (searchedUser && searchedUser.uid === uid) {
+              setSearchedUser({...searchedUser, canCreateRoom: !currentStatus});
+          }
+          await fetchUsers();
+          alert(!currentStatus ? "تم تفعيل خاصية إنشاء الغرف" : "تم إلغاء خاصية إنشاء الغرف");
       } catch (e) {
           alert("فشل التحديث");
       }
@@ -597,6 +618,20 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, language }) => 
                                           </button>
                                       </div>
 
+                                      {/* Room Permission Toggle */}
+                                      <div className="mt-2 pt-2 border-t border-gray-800">
+                                          <button 
+                                            onClick={() => handleToggleRoomCreation(searchedUser.uid!, searchedUser.canCreateRoom || false)}
+                                            className={`w-full py-2 rounded text-xs font-bold flex items-center justify-center gap-2 border transition ${searchedUser.canCreateRoom ? 'bg-red-900/20 text-red-400 border-red-500' : 'bg-green-900/20 text-green-400 border-green-500'}`}
+                                          >
+                                              {searchedUser.canCreateRoom ? (
+                                                  <><Lock className="w-3 h-3"/> إلغاء ميزة إنشاء الغرف</>
+                                              ) : (
+                                                  <><Unlock className="w-3 h-3"/> تفعيل ميزة إنشاء الغرف</>
+                                              )}
+                                          </button>
+                                      </div>
+
                                       {/* Agency Controls */}
                                       <div className="mt-2 pt-2 border-t border-gray-800">
                                           {searchedUser.isAgent ? (
@@ -714,8 +749,6 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, language }) => 
           </div>
       )}
 
-      {/* Agencies, Banners, Official, System, Modals... same as before */}
-      {/* ... (rest of the component remains unchanged, assuming standard structure) ... */}
       {activeTab === 'agencies' && (
           <div className="flex-1 p-6 flex flex-col overflow-y-auto">
               <h3 className="font-bold text-blue-400 mb-4 flex items-center gap-2">

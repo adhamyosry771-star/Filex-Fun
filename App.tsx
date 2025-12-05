@@ -17,6 +17,7 @@ import SearchView from './components/SearchView';
 import PrivateChatView from './components/PrivateChatView';
 import AgencyView from './components/AgencyView';
 import EditProfileModal from './components/EditProfileModal';
+import UserListModal from './components/UserListModal'; // New Import
 import { ViewState, Room, User, Language, PrivateChatSummary } from './types';
 import { auth } from './firebaseConfig';
 import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
@@ -37,9 +38,12 @@ const App: React.FC = () => {
   const [isGuest, setIsGuest] = useState(false);
   
   const [showAvatarEdit, setShowAvatarEdit] = useState(false);
-  const [showEditProfile, setShowEditProfile] = useState(false); // New State for Edit Modal
+  const [showEditProfile, setShowEditProfile] = useState(false); 
   const [showSettings, setShowSettings] = useState(false);
   const [showSupport, setShowSupport] = useState(false);
+
+  // New State for List Modal (Friends, Followers, etc.)
+  const [listModalType, setListModalType] = useState<'friends' | 'followers' | 'following' | 'visitors' | null>(null);
 
   const [activeChat, setActiveChat] = useState<PrivateChatSummary | null>(null);
   
@@ -475,12 +479,10 @@ const App: React.FC = () => {
                     </span>
                  </div>
                  
-                 {/* Glass-morphism Age and Country Badges */}
                  {(userProfile.country || userProfile.age) && (
                      <div className="flex items-center justify-center gap-3 mt-4 w-full">
                          {userProfile.country && (
                              <div className="glass px-3 py-1.5 rounded-full flex items-center gap-2 text-xs font-bold text-white/90 shadow-sm border border-white/10">
-                                 {/* Check if text contains emoji flag, if not show Globe */}
                                  {/\p{Emoji}/u.test(userProfile.country) ? '' : <Globe className="w-3.5 h-3.5 text-blue-400" />}
                                  <span>{userProfile.country}</span>
                              </div>
@@ -496,14 +498,19 @@ const App: React.FC = () => {
                  )}
             </div>
 
+            {/* CLICKABLE STATS ROW */}
             <div className="flex justify-around items-center w-full px-4 py-4 glass mb-4">
                 {[
-                    { label: t('friends'), count: userProfile.friendsCount || 0 },
-                    { label: t('followers'), count: userProfile.followersCount || 0 },
-                    { label: t('following'), count: userProfile.followingCount || 0 },
-                    { label: t('visitors'), count: userProfile.visitorsCount || 0 },
+                    { label: t('friends'), count: userProfile.friendsCount || 0, type: 'friends' },
+                    { label: t('followers'), count: userProfile.followersCount || 0, type: 'followers' },
+                    { label: t('following'), count: userProfile.followingCount || 0, type: 'following' },
+                    { label: t('visitors'), count: userProfile.visitorsCount || 0, type: 'visitors' },
                 ].map((stat, idx) => (
-                    <div key={idx} className="flex flex-col items-center cursor-pointer hover:opacity-80 transition group">
+                    <div 
+                        key={idx} 
+                        onClick={() => setListModalType(stat.type as any)}
+                        className="flex flex-col items-center cursor-pointer hover:opacity-80 transition group active:scale-95"
+                    >
                         <span className="text-lg font-bold text-white group-hover:text-brand-400 transition">{stat.count}</span>
                         <span className="text-[10px] text-gray-400 font-medium uppercase tracking-wide">{stat.label}</span>
                     </div>
@@ -614,6 +621,15 @@ const App: React.FC = () => {
                     language={language}
                     onClose={() => setShowEditProfile(false)}
                     onUpdate={(updatedData) => setUserProfile({ ...userProfile, ...updatedData })}
+                />
+            )}
+
+            {listModalType && (
+                <UserListModal
+                    type={listModalType}
+                    userId={userProfile.uid!}
+                    onClose={() => setListModalType(null)}
+                    language={language}
                 />
             )}
 

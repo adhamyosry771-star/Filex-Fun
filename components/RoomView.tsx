@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { ArrowLeft, Send, Heart, Share2, Gift as GiftIcon, Users, Crown, Mic, MicOff, Lock, Unlock, Settings, Image as ImageIcon, X, Info, Minimize2, LogOut, BadgeCheck, Loader2, Upload, Shield, Trophy, Bot, Volume2, VolumeX, ArrowDownCircle, Ban, Trash2, UserCog, UserMinus, Zap, BarChart3, Gamepad2, Clock, LayoutGrid, Flag, Music, Play, Pause, SkipForward, SkipBack, Hexagon, ListMusic, Plus, Check, Search, Circle, CheckCircle2, KeyRound } from 'lucide-react';
 import { Room, ChatMessage, Gift, Language, User, RoomSeat } from '../types';
@@ -1207,13 +1206,13 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
                   const bubbleClass = getBubbleClass(msg.bubbleId);
 
                   return (
-                      <div key={msg.id} className={`flex items-start gap-2 ${isMe ? 'flex-row-reverse' : ''} animate-in slide-in-from-bottom-2`}>
+                      <div key={msg.id} className="flex items-start gap-2 animate-in slide-in-from-bottom-2">
                           <div className={`relative w-8 h-8 shrink-0 p-[2px] rounded-full ${isAi ? 'border-2 border-brand-400 shadow-lg' : getFrameClass(msg.frameId)}`}>
                               {msg.userAvatar ? <img src={msg.userAvatar} className="w-full h-full rounded-full object-cover" /> : <div className="w-full h-full bg-gray-600 rounded-full"></div>}
                               {isOfficial && <div className="absolute -bottom-1 -right-1 bg-white rounded-full p-[1px]"><BadgeCheck className="w-3 h-3 text-blue-500 fill-blue-100" /></div>}
                               {isAi && <div className="absolute -bottom-1 -right-1 bg-black rounded-full p-[2px]"><Bot className="w-3 h-3 text-brand-400" /></div>}
                           </div>
-                          <div className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} max-w-[80%]`}>
+                          <div className="flex flex-col items-start max-w-[80%]">
                               <div className="flex items-center gap-1 mb-0.5 px-1 flex-wrap">
                                    {(msg.vipLevel || 0) > 0 && <span className="bg-gradient-to-r from-gold-400 to-orange-500 text-black text-[8px] font-black px-1 rounded">V{msg.vipLevel}</span>}
                                    
@@ -1226,7 +1225,7 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
 
                                    <span className={`text-[10px] font-bold flex items-center gap-1 ${getVipTextStyle(msg.vipLevel || 0)}`}>{msg.userName}{isOfficial && <BadgeCheck className="w-3 h-3 text-blue-500 fill-blue-100 inline" />}{isAi && <span className="text-[8px] bg-brand-600 text-white px-1 rounded">BOT</span>}</span>
                               </div>
-                              <div className={`px-3 py-1.5 text-xs leading-relaxed text-white shadow-sm break-words border border-white/5 backdrop-blur-md ${bubbleClass} ${isMe ? 'rounded-tr-none' : 'rounded-tl-none'} ${isYellowMsg ? 'text-yellow-300 font-bold border-yellow-500/50 bg-yellow-900/20' : ''}`}>{msg.text}</div>
+                              <div className={`px-3 py-1.5 text-xs leading-relaxed text-white shadow-sm break-words border border-white/5 backdrop-blur-md ${bubbleClass} rounded-tr-none ${isYellowMsg ? 'text-yellow-300 font-bold border-yellow-500/50 bg-yellow-900/20' : ''}`}>{msg.text}</div>
                           </div>
                       </div>
                   );

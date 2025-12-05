@@ -39,7 +39,9 @@ import {
   PrivateMessage, 
   PrivateChatSummary,
   StoreItem,
-  RoomSeat
+  RoomSeat,
+  Visitor,
+  RelatedUser
 } from '../types';
 
 // --- Helper to Sanitize Data for Firestore ---
@@ -106,6 +108,7 @@ export const createUserProfile = async (uid: string, data: Partial<User>) => {
     visitorsCount: 0,
     isAdmin: false,
     adminRole: null,
+    canCreateRoom: false, // Default: creating rooms is locked
     ...data
   };
   await setDoc(doc(db, 'users', uid), userData);
@@ -131,6 +134,79 @@ export const searchUserByDisplayId = async (displayId: string): Promise<User | n
   const snap = await getDocs(q);
   if (!snap.empty) return snap.docs[0].data() as User;
   return null;
+};
+
+// --- Profile Interactions (Lists & Visits) ---
+
+export const recordProfileVisit = async (targetUid: string, visitor: User) => {
+    if (!visitor.uid || visitor.uid === targetUid) return; // Don't record self visits
+
+    const visitorRef = doc(db, `users/${targetUid}/visitors`, visitor.uid);
+    const targetUserRef = doc(db, 'users', targetUid);
+
+    await runTransaction(db, async (transaction) => {
+        const visitDoc = await transaction.get(visitorRef);
+        const now = Date.now();
+
+        if (visitDoc.exists()) {
+            // Update existing visit
+            transaction.update(visitorRef, {
+                lastVisitTime: now,
+                visitCount: increment(1),
+                name: visitor.name, // Update name/avatar in case they changed
+                avatar: visitor.avatar
+            });
+        } else {
+            // Create new visit
+            const visitData: Visitor = {
+                uid: visitor.uid!,
+                name: visitor.name,
+                avatar: visitor.avatar,
+                lastVisitTime: now,
+                visitCount: 1
+            };
+            transaction.set(visitorRef, visitData);
+            // Increment total visitors count on the user profile
+            transaction.update(targetUserRef, { visitorsCount: increment(1) });
+        }
+    });
+};
+
+export const getUserList = async (uid: string, type: 'friends' | 'followers' | 'following' | 'visitors'): Promise<any[]> => {
+    const colRef = collection(db, `users/${uid}/${type}`);
+    // Sort logic depends on type
+    let q;
+    if (type === 'visitors') {
+        q = query(colRef, orderBy('lastVisitTime', 'desc'), limit(50));
+    } else {
+        q = query(colRef, limit(50)); // Can add orderBy timestamp if available in future
+    }
+    
+    const snap = await getDocs(q);
+    
+    // For friends/following/followers, we might only have IDs, so we need to fetch full profile or store snapshot.
+    // Assuming for now we stored basic info (name, avatar) when the relation was created.
+    // If not, we'd need to fetch user profiles. For Visitor, we store info.
+    
+    const list: any[] = [];
+    
+    // For lists that might just contain timestamps (like friends ref), we need to fetch user data
+    if (type === 'friends') { // Logic for friend document structure
+       const userIds = snap.docs.map(d => d.id);
+       if (userIds.length > 0) {
+           // Firestore 'in' query supports max 10
+           // Doing individual fetches for simplicity or batching in real app
+           for (const id of userIds) {
+               const p = await getUserProfile(id);
+               if (p) list.push({ uid: p.uid, name: p.name, avatar: p.avatar });
+           }
+       }
+    } else {
+       // Visitors and Request-Based lists usually have data embedded
+       snap.forEach(d => list.push(d.data()));
+    }
+    
+    return list;
 };
 
 // --- Admin ---

@@ -1,8 +1,10 @@
+
 import React, { useEffect, useState } from 'react';
 import { X, Copy, Crown, Shield, Gift as GiftIcon, Loader2, BadgeCheck, Globe, Calendar, Mars, Venus } from 'lucide-react';
 import { User, Language, Gift } from '../types';
-import { listenToUserProfile } from '../services/firebaseService';
+import { listenToUserProfile, recordProfileVisit } from '../services/firebaseService';
 import { GIFTS, VIP_TIERS, ADMIN_ROLES, LEVEL_ICONS, CHARM_ICONS, STORE_ITEMS } from '../constants';
+import { auth } from '../firebaseConfig';
 
 interface FullProfileViewProps {
   user: User; // Basic info to start with (at least ID/UID)
@@ -24,6 +26,28 @@ const FullProfileView: React.FC<FullProfileViewProps> = ({ user: initialUser, on
           return () => unsub();
       } else {
           setLoading(false);
+      }
+  }, [initialUser.uid]);
+
+  // Record Visit Logic
+  useEffect(() => {
+      const currentUserUid = auth.currentUser?.uid;
+      if (currentUserUid && initialUser.uid && currentUserUid !== initialUser.uid) {
+          // We need the current user's details to record the visit. 
+          // Assuming auth.currentUser has basic info or we fetch it. 
+          // For simplicity/speed, we use basic auth info or placeholder if profile not loaded in context here.
+          // Better approach: Pass currentUser full object to this component. 
+          // But to be safe with existing props:
+          const visitor: User = {
+              uid: currentUserUid,
+              id: 'visitor', // Placeholder, service will update if needed or ignored
+              name: auth.currentUser?.displayName || 'Visitor',
+              avatar: auth.currentUser?.photoURL || '',
+              level: 0,
+              vip: false,
+              wallet: { diamonds: 0, coins: 0 }
+          };
+          recordProfileVisit(initialUser.uid, visitor);
       }
   }, [initialUser.uid]);
 

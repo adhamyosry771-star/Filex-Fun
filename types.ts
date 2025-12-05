@@ -29,6 +29,21 @@ export interface FriendRequest {
   timestamp: number;
 }
 
+export interface RelatedUser {
+  uid: string;
+  name: string;
+  avatar: string;
+  timestamp?: number; // For friends/following
+}
+
+export interface Visitor {
+  uid: string;
+  name: string;
+  avatar: string;
+  lastVisitTime: number;
+  visitCount: number;
+}
+
 export interface User {
   uid?: string;
   id: string;
@@ -54,6 +69,7 @@ export interface User {
   visitorsCount?: number;
   isAdmin?: boolean;
   adminRole?: 'super_admin' | 'admin' | 'official_manager' | 'me_manager' | null;
+  canCreateRoom?: boolean; // New Permission Field
   bio?: string;
   isBanned?: boolean;
   banExpiresAt?: number; // Timestamp for when ban ends

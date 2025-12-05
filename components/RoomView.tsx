@@ -800,9 +800,6 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
       setLoadingSeatIndex(index);
       loadingSeatRef.current = index; // Set Ref for listener to check
       
-      // Removed optimistic setRoom update to prevent bouncing.
-      // We now strictly wait for the server confirmation via onSnapshot.
-
       try { 
           await takeSeat(room.id, index, currentUser);
           
@@ -896,8 +893,8 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
 
           try {
               const isOuter = type === 'outer';
-              // Use aggressive compression quality (0.4)
-              const compressed = await compressImage(file, 800, 0.4, isGif);
+              // Use improved compression: 1280px, 0.7 quality
+              const compressed = await compressImage(file, 1280, 0.7, isGif);
               
               if (compressed.length > 950000) { 
                   alert(language === 'ar' ? "الصورة بعد المعالجة لا تزال كبيرة جداً. حاول استخدام صورة أصغر أو ثابتة." : "Processed image is still too large for database. Please try a smaller/static image.");
@@ -1037,12 +1034,15 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
   return (
     <div className="relative h-[100dvh] w-full bg-black flex flex-col overflow-hidden">
       
-      <div className="absolute inset-0 z-0 bg-gray-900">
+      {/* FULL SCREEN BACKGROUND - High Clarity */}
+      <div className="absolute inset-0 z-0 bg-gray-900 overflow-hidden">
         <img 
           src={room.backgroundImage || room.thumbnail} 
-          className="w-full h-full object-cover object-center opacity-100 transition-opacity duration-700" 
+          className="w-full h-full object-cover object-center transition-opacity duration-700" 
+          alt="Room Background"
         />
-        <div className="absolute inset-0 bg-gradient-to-b from-black/5 via-transparent to-black/60"></div>
+        {/* Subtle Gradient Overlay for Text Readability */}
+        <div className="absolute inset-0 bg-gradient-to-b from-black/60 via-transparent to-black/80 z-0 pointer-events-none"></div>
       </div>
 
       {activeAnimations.map(anim => (

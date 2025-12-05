@@ -19,8 +19,8 @@ const AvatarSelector: React.FC<AvatarSelectorProps> = ({ currentAvatar, onSelect
       title: { ar: 'اختر الصورة الرمزية', en: 'Choose Avatar' },
       gallery: { ar: 'المعرض', en: 'Gallery' },
       upload: { ar: 'رفع صورة', en: 'Upload' },
-      uploadDesc: { ar: 'اضغط لرفع صورة من جهازك', en: 'Click to upload from device' },
-      maxSize: { ar: 'الحد الأقصى 2 ميجابايت', en: 'Max size 2MB' }
+      uploadDesc: { ar: 'اضغط لرفع صورة من جهازك (يدعم GIF)', en: 'Click to upload (GIF supported)' },
+      maxSize: { ar: 'الحد الأقصى 5 ميجابايت', en: 'Max size 5MB' }
     };
     return dict[key][language];
   };
@@ -28,8 +28,8 @@ const AvatarSelector: React.FC<AvatarSelectorProps> = ({ currentAvatar, onSelect
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      if (file.size > 2 * 1024 * 1024) {
-        alert(language === 'ar' ? 'حجم الصورة كبير جداً' : 'Image size is too large');
+      if (file.size > 5 * 1024 * 1024) {
+        alert(language === 'ar' ? 'حجم الصورة كبير جداً (أقصى حد 5 ميجا)' : 'Image size is too large (Max 5MB)');
         return;
       }
 
@@ -94,11 +94,11 @@ const AvatarSelector: React.FC<AvatarSelectorProps> = ({ currentAvatar, onSelect
           {activeTab === 'upload' && (
             <div className="h-full flex flex-col items-center justify-center gap-4">
               <label className="w-full aspect-square max-w-[200px] border-2 border-dashed border-gray-600 rounded-3xl flex flex-col items-center justify-center cursor-pointer hover:border-brand-500 hover:bg-white/5 transition group">
-                <input type="file" accept="image/*" className="hidden" onChange={handleFileUpload} />
+                <input type="file" accept="image/png, image/jpeg, image/gif, image/webp" className="hidden" onChange={handleFileUpload} />
                 <div className="w-16 h-16 rounded-full bg-gray-800 flex items-center justify-center mb-4 group-hover:scale-110 transition">
                    <Camera className="w-8 h-8 text-brand-400" />
                 </div>
-                <p className="text-gray-300 font-bold text-sm">{t('uploadDesc')}</p>
+                <p className="text-gray-300 font-bold text-sm text-center">{t('uploadDesc')}</p>
                 <p className="text-gray-500 text-xs mt-1">{t('maxSize')}</p>
               </label>
             </div>

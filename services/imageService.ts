@@ -1,6 +1,21 @@
 
-export const compressImage = (file: File, maxWidth = 800, quality = 0.6): Promise<string> => {
+export const compressImage = (file: File, maxWidth = 800, quality = 0.6, allowGif = false): Promise<string> => {
   return new Promise((resolve, reject) => {
+    // If it's a GIF and we allow animation, bypass compression to preserve frames
+    if (allowGif && file.type === 'image/gif') {
+        const reader = new FileReader();
+        reader.onload = (event) => {
+            if (typeof event.target?.result === 'string') {
+                resolve(event.target.result);
+            } else {
+                reject(new Error("File read error"));
+            }
+        };
+        reader.onerror = (err) => reject(err);
+        reader.readAsDataURL(file);
+        return;
+    }
+
     const reader = new FileReader();
     reader.onload = (event) => {
       const img = new Image();

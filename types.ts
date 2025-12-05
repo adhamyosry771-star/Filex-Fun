@@ -146,6 +146,8 @@ export interface Room {
   isHot?: boolean;
   isOfficial?: boolean;
   isActivities?: boolean; // New field for Activities Badge
+  isLocked?: boolean; // New: Room Lock Status
+  password?: string; // New: Room Password
   contributors?: Record<string, Contributor>;
   cupStartTime?: number; // Timestamp when the current cup started
   bannedUsers?: Record<string, number>; // Map of UserUID -> ExpirationTimestamp (-1 for permanent)

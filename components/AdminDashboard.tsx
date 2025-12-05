@@ -498,18 +498,23 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, language }) => 
   return (
     <div dir="rtl" className="h-full bg-black text-gold-400 flex flex-col font-sans relative">
       {/* Header */}
-      <div className="p-4 bg-gray-900 border-b border-gold-500/30 flex items-center gap-4 shadow-lg relative overflow-hidden shrink-0">
+      <div className="p-4 bg-gray-900 border-b border-gold-500/30 flex flex-col gap-4 shadow-lg relative overflow-hidden shrink-0">
         <div className="absolute inset-0 bg-gradient-to-l from-gold-500/10 to-transparent pointer-events-none"></div>
-        <div className="flex items-center gap-3 relative z-10 shrink-0">
+        
+        {/* Top Row: Back Button & Centered Title */}
+        <div className="flex items-center justify-between relative z-10 w-full">
             <button onClick={onBack} className="p-2 rounded-full hover:bg-white/10 text-gold-400">
                 <ArrowLeft className="w-5 h-5" />
             </button>
-            <h1 className="text-xl font-bold flex items-center gap-2 text-gold-100 whitespace-nowrap">
+            <h1 className="text-xl font-bold flex items-center gap-2 text-gold-100 mx-auto">
                 <Shield className="w-6 h-6 text-gold-500" />
                 لوحة التحكم
             </h1>
+            <div className="w-9"></div> {/* Spacer to keep title centered */}
         </div>
-        <div className="flex gap-2 relative z-10 overflow-x-auto flex-1 scrollbar-hide">
+
+        {/* Bottom Row: Navigation Tabs */}
+        <div className="flex gap-2 relative z-10 overflow-x-auto w-full scrollbar-hide justify-center">
             <button 
                 onClick={() => setActiveTab('users')}
                 className={`px-3 py-1 rounded border border-gold-500/30 text-[10px] font-bold whitespace-nowrap ${activeTab === 'users' ? 'bg-gold-500 text-black' : 'text-gold-500'}`}

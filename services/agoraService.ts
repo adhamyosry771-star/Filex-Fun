@@ -1,5 +1,5 @@
 
-import AgoraRTC, { IAgoraRTCClient, IMicrophoneAudioTrack } from 'agora-rtc-sdk-ng';
+import AgoraRTC, { IAgoraRTCClient, IMicrophoneAudioTrack, IBufferSourceAudioTrack } from 'agora-rtc-sdk-ng';
 
 // ---------------------------------------------------------------------------
 // ⚠️ AGORA CONFIGURATION - HIGH QUALITY & STABILITY
@@ -8,6 +8,7 @@ const APP_ID = "3c427b50bc824baebaca30a5de42af68";
 
 let client: IAgoraRTCClient | null = null;
 let localAudioTrack: IMicrophoneAudioTrack | null = null;
+let localMusicTrack: IBufferSourceAudioTrack | null = null;
 let isRoomAudioMuted = false;
 let currentChannel = '';
 
@@ -33,8 +34,14 @@ export const initializeAgora = async () => {
     log('Initializing Client...');
     client = AgoraRTC.createClient({ mode: "rtc", codec: "vp8" });
     
-    // Enable Volume Indicator
+    // Enable Volume Indicator with low interval for fast visual feedback (50ms)
     client.enableAudioVolumeIndicator();
+    // Use a custom configuration if the SDK supports passing interval here, 
+    // otherwise default is usually 200ms. If needed, re-check Agora docs for version 4.x specifics on setting interval.
+    // In v4.x, enableAudioVolumeIndicator takes no args or interval. 
+    // Actually, in v4.x, it's client.enableAudioVolumeIndicator(); and the event fires every 200ms by default.
+    // We can't easily change the 200ms in basic config, but we can ensure we handle it efficiently.
+    
     client.on("volume-indicator", (volumes) => {
         if (volumeCallback) volumeCallback(volumes);
     });
@@ -159,9 +166,15 @@ export const switchMicrophoneState = async (shouldPublish: boolean, muted: boole
             // 3. Publish (Network op)
             // Only publish if not already published to avoid errors
             if (client.connectionState === 'CONNECTED') {
-                const isPublished = client.localTracks.some(t => t.trackId === localAudioTrack?.trackId);
-                if (!isPublished) {
-                    await client.publish([localAudioTrack]);
+                const tracksToPublish = [localAudioTrack];
+                if (localMusicTrack) tracksToPublish.push(localMusicTrack);
+
+                // Check what's already published
+                const publishedTracks = client.localTracks;
+                const tracksToActuallyPublish = tracksToPublish.filter(t => !publishedTracks.includes(t));
+
+                if (tracksToActuallyPublish.length > 0) {
+                    await client.publish(tracksToActuallyPublish);
                     log('✅ Mic Published');
                 }
             } else {
@@ -206,6 +219,11 @@ export const leaveVoiceChannel = async () => {
             localAudioTrack.close();
             localAudioTrack = null;
         }
+        if (localMusicTrack) {
+            localMusicTrack.stop();
+            localMusicTrack.close();
+            localMusicTrack = null;
+        }
         
         if (client) {
             await client.leave();
@@ -235,3 +253,72 @@ export const toggleAllRemoteAudio = (muted: boolean) => {
         });
     }
 };
+
+// --- MUSIC PLAYER FUNCTIONS ---
+
+export const playMusicFile = async (file: File) => {
+    if (!client) return;
+    
+    // Stop previous music if any
+    await stopMusic();
+
+    try {
+        localMusicTrack = await AgoraRTC.createBufferSourceAudioTrack({ source: file });
+        
+        // Prepare playback
+        localMusicTrack.startProcessAudioBuffer();
+        
+        // Play locally so the host hears it
+        localMusicTrack.play();
+        
+        // Publish to room so others hear it
+        if (client.connectionState === 'CONNECTED') {
+            await client.publish(localMusicTrack);
+        }
+
+        return localMusicTrack;
+    } catch (e) {
+        console.error("Failed to play music", e);
+        throw e;
+    }
+};
+
+export const stopMusic = async () => {
+    if (localMusicTrack) {
+        if (client && client.connectionState === 'CONNECTED') {
+            try {
+                await client.unpublish(localMusicTrack);
+            } catch (e) { /* ignore */ }
+        }
+        localMusicTrack.stop();
+        localMusicTrack.close();
+        localMusicTrack = null;
+    }
+};
+
+export const pauseMusic = () => {
+    if (localMusicTrack) {
+        localMusicTrack.pauseProcessAudioBuffer();
+    }
+};
+
+export const resumeMusic = () => {
+    if (localMusicTrack) {
+        localMusicTrack.resumeProcessAudioBuffer();
+    }
+};
+
+export const setMusicVolume = (volume: number) => {
+    if (localMusicTrack) {
+        // Volume for local playback and publishing (0 - 100)
+        localMusicTrack.setVolume(volume);
+    }
+};
+
+export const seekMusic = (position: number) => {
+    if (localMusicTrack) {
+        localMusicTrack.seekAudioBuffer(position);
+    }
+};
+
+export const getMusicTrack = () => localMusicTrack;

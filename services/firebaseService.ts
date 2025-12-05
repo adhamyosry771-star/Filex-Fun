@@ -272,6 +272,8 @@ export const createRoom = async (title: string, thumbnail: string, host: User, h
         isHot: false,
         isOfficial: false,
         isActivities: false,
+        isLocked: false, // Default unlocked
+        password: '', // Default no password
         contributors: {},
         cupStartTime: Date.now(), 
         bannedUsers: {}, // Initialize as map

@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { Users, Search, Bell, Plus, X, Image as ImageIcon, Upload, Flame, Tag, UserPlus, BadgeCheck, ChevronRight, ChevronLeft, Gamepad2 } from 'lucide-react';
+import { Users, Search, Bell, Plus, X, Image as ImageIcon, Upload, Flame, Tag, UserPlus, BadgeCheck, ChevronRight, ChevronLeft, Gamepad2, Lock, LayoutGrid, List, Info } from 'lucide-react';
 import { Room, Language, User, Banner } from '../types';
 import { createRoom, listenToBanners } from '../services/firebaseService';
 import { auth } from '../firebaseConfig';
@@ -24,9 +24,19 @@ const HomeView: React.FC<HomeViewProps> = ({ rooms, onJoinRoom, language, userPr
   const [showSearchBar, setShowSearchBar] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
 
+  // View Mode State (Grid vs List) with Persistence
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>(() => {
+      const saved = localStorage.getItem('roomViewMode');
+      return (saved === 'grid' || saved === 'list') ? saved : 'grid';
+  });
+
   // Banner State
   const [banners, setBanners] = useState<Banner[]>([]);
   const [currentSlide, setCurrentSlide] = useState(0);
+
+  // Lock State
+  const [passwordModalRoom, setPasswordModalRoom] = useState<Room | null>(null);
+  const [passwordInput, setPasswordInput] = useState('');
 
   useEffect(() => {
       const unsub = listenToBanners((data) => setBanners(data));
@@ -41,6 +51,12 @@ const HomeView: React.FC<HomeViewProps> = ({ rooms, onJoinRoom, language, userPr
       }, 5000);
       return () => clearInterval(interval);
   }, [banners.length]);
+
+  const toggleViewMode = () => {
+      const newMode = viewMode === 'grid' ? 'list' : 'grid';
+      setViewMode(newMode);
+      localStorage.setItem('roomViewMode', newMode);
+  };
 
   const t = (key: string) => {
     const dict: Record<string, { ar: string, en: string }> = {
@@ -60,7 +76,11 @@ const HomeView: React.FC<HomeViewProps> = ({ rooms, onJoinRoom, language, userPr
         searchPlaceholder: { ar: 'بحث عن غرفة، مضيف، أو تاج...', en: 'Search rooms, hosts, or tags...' },
         findUsers: { ar: 'هل تبحث عن مستخدم؟', en: 'Looking for a user?' },
         clear: { ar: 'مسح', en: 'Clear' },
-        official: { ar: 'غرفة رسمية', en: 'Official Room' }
+        official: { ar: 'غرفة رسمية', en: 'Official Room' },
+        enterPass: { ar: 'أدخل كلمة المرور', en: 'Enter Password' },
+        passWrong: { ar: 'كلمة المرور خاطئة', en: 'Wrong Password' },
+        join: { ar: 'دخول', en: 'Join' },
+        privateRoom: { ar: 'غرفة خاصة', en: 'Private Room' }
     };
     return dict[key][language];
   };
@@ -121,6 +141,31 @@ const HomeView: React.FC<HomeViewProps> = ({ rooms, onJoinRoom, language, userPr
               }
           };
           reader.readAsDataURL(file);
+      }
+  };
+
+  const handleRoomClick = (room: Room) => {
+      // Logic for locking
+      const isHost = room.hostId === userProfile?.id;
+      const isAdmin = room.admins?.includes(auth.currentUser?.uid || '');
+      
+      // If Locked and NOT Host/Admin
+      if (room.isLocked && !isHost && !isAdmin) {
+          setPasswordModalRoom(room);
+          setPasswordInput('');
+          return;
+      }
+
+      onJoinRoom(room);
+  };
+
+  const submitPassword = () => {
+      if (!passwordModalRoom) return;
+      if (passwordInput === passwordModalRoom.password) {
+          onJoinRoom(passwordModalRoom);
+          setPasswordModalRoom(null);
+      } else {
+          alert(t('passWrong'));
       }
   };
 
@@ -238,21 +283,31 @@ const HomeView: React.FC<HomeViewProps> = ({ rooms, onJoinRoom, language, userPr
             </div>
         )}
 
-        {/* Categories - Only show if not searching */}
+        {/* Categories & View Toggle */}
         {!searchQuery && (
-            <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-hide">
-                {categories.map((cat, i) => (
-                    <button 
-                        key={cat} 
-                        className={`px-4 py-1.5 rounded-full text-sm font-medium whitespace-nowrap transition ${i === 0 ? 'bg-white text-black' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'}`}
-                    >
-                        {cat}
-                    </button>
-                ))}
+            <div className="flex items-center justify-between gap-2">
+                <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-hide flex-1">
+                    {categories.map((cat, i) => (
+                        <button 
+                            key={cat} 
+                            className={`px-4 py-1.5 rounded-full text-sm font-medium whitespace-nowrap transition ${i === 0 ? 'bg-white text-black' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'}`}
+                        >
+                            {cat}
+                        </button>
+                    ))}
+                </div>
+                
+                {/* View Mode Toggle */}
+                <button 
+                    onClick={toggleViewMode}
+                    className="p-2 bg-gray-800 rounded-xl text-gray-400 hover:text-white hover:bg-gray-700 transition border border-white/5 shrink-0"
+                >
+                    {viewMode === 'grid' ? <List className="w-5 h-5"/> : <LayoutGrid className="w-5 h-5"/>}
+                </button>
             </div>
         )}
 
-        {/* Room Grid */}
+        {/* Room Grid / List */}
         {filteredRooms.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-10 text-center opacity-60">
                 <div className="w-20 h-20 bg-gray-800 rounded-full flex items-center justify-center mb-4 border border-gray-700">
@@ -266,88 +321,183 @@ const HomeView: React.FC<HomeViewProps> = ({ rooms, onJoinRoom, language, userPr
                 )}
             </div>
         ) : (
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
-                {filteredRooms.map((room) => {
-                    // Styles for special rooms
-                    // UPDATED: Now strictly follows the DB flags, removed manual override
-                    const isOfficial = room.isOfficial;
-                    const isActivities = room.isActivities;
-                    
-                    const containerClass = isOfficial 
-                        ? 'border-2 border-red-500 shadow-[0_0_15px_rgba(239,68,68,0.4)]' 
-                        : isActivities
-                            ? 'border-2 border-red-600/70 shadow-[0_0_10px_rgba(220,38,38,0.4)]'
-                            : room.isHot 
-                                ? 'border-2 border-orange-500/50 shadow-[0_0_10px_rgba(249,115,22,0.3)]'
-                                : 'border border-white/5';
-                    
-                    return (
-                        <div 
-                            key={room.id} 
-                            onClick={(e) => {
-                            e.stopPropagation();
-                            onJoinRoom(room);
-                            }}
-                            className={`relative group cursor-pointer active:scale-95 transition-transform bg-gray-800 rounded-xl overflow-hidden shadow-md cursor-pointer ${containerClass}`}
-                            style={{cursor: 'pointer', zIndex: 1}}
-                        >
-                            <div className="aspect-[3/4] relative w-full h-full pointer-events-none">
-                                <img 
-                                    src={room.thumbnail} 
-                                    alt={room.title} 
-                                    className="w-full h-full object-cover group-hover:scale-110 transition duration-500 opacity-80"
-                                />
-                                <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent pointer-events-none"></div>
-                                
-                                {/* Music Wave Animation - Top Right */}
-                                <div className="absolute top-3 right-3 flex items-end gap-0.5 z-20 pointer-events-none">
-                                    <div className="w-0.5 h-2 bg-brand-400 rounded-full animate-[pulse_0.6s_ease-in-out_infinite]"></div>
-                                    <div className="w-0.5 h-4 bg-brand-400 rounded-full animate-[pulse_0.8s_ease-in-out_infinite]"></div>
-                                    <div className="w-0.5 h-3 bg-brand-400 rounded-full animate-[pulse_1s_ease-in-out_infinite]"></div>
-                                    <div className="w-0.5 h-2 bg-brand-400 rounded-full animate-[pulse_1.2s_ease-in-out_infinite]"></div>
-                                </div>
+            <>
+                {viewMode === 'grid' ? (
+                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4 animate-in fade-in duration-500">
+                        {filteredRooms.map((room) => {
+                            const isOfficial = room.isOfficial;
+                            const isActivities = room.isActivities;
+                            
+                            const containerClass = isOfficial 
+                                ? 'border-2 border-red-500 shadow-[0_0_15px_rgba(239,68,68,0.4)]' 
+                                : isActivities
+                                    ? 'border-2 border-red-600/70 shadow-[0_0_10px_rgba(220,38,38,0.4)]'
+                                    : room.isHot 
+                                        ? 'border-2 border-orange-500/50 shadow-[0_0_10px_rgba(249,115,22,0.3)]'
+                                        : 'border border-white/5';
+                            
+                            return (
+                                <div 
+                                    key={room.id} 
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleRoomClick(room);
+                                    }}
+                                    className={`relative group cursor-pointer active:scale-95 transition-transform bg-gray-800 rounded-xl overflow-hidden shadow-md cursor-pointer ${containerClass}`}
+                                    style={{cursor: 'pointer', zIndex: 1}}
+                                >
+                                    <div className="aspect-[3/4] relative w-full h-full pointer-events-none">
+                                        <img 
+                                            src={room.thumbnail} 
+                                            alt={room.title} 
+                                            className="w-full h-full object-cover group-hover:scale-110 transition duration-500 opacity-80"
+                                        />
+                                        <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent pointer-events-none"></div>
+                                        
+                                        {/* Lock Icon Overlay if Locked */}
+                                        {room.isLocked && (
+                                            <div className="absolute inset-0 flex items-center justify-center bg-black/40 backdrop-blur-[2px] z-10">
+                                                <div className="bg-black/60 p-3 rounded-full border border-white/20">
+                                                    <Lock className="w-6 h-6 text-white/80" />
+                                                </div>
+                                            </div>
+                                        )}
 
-                                {/* Status Tags */}
-                                <div className="absolute top-2 left-2 flex flex-col gap-1 items-start pointer-events-none">
-                                    {isOfficial && (
-                                        <div className="bg-blue-600/90 backdrop-blur rounded-full px-2 py-0.5 w-fit flex items-center gap-1 shadow-lg border border-blue-400/50">
-                                            <BadgeCheck className="w-3 h-3 text-white fill-blue-600" />
-                                            <span className="text-[9px] font-bold text-white">OFFICIAL</span>
+                                        {/* Music Wave Animation - Top Right */}
+                                        <div className="absolute top-3 right-3 flex items-end gap-0.5 z-20 pointer-events-none">
+                                            <div className="w-0.5 h-2 bg-brand-400 rounded-full animate-[pulse_0.6s_ease-in-out_infinite]"></div>
+                                            <div className="w-0.5 h-4 bg-brand-400 rounded-full animate-[pulse_0.8s_ease-in-out_infinite]"></div>
+                                            <div className="w-0.5 h-3 bg-brand-400 rounded-full animate-[pulse_1s_ease-in-out_infinite]"></div>
+                                            <div className="w-0.5 h-2 bg-brand-400 rounded-full animate-[pulse_1.2s_ease-in-out_infinite]"></div>
                                         </div>
-                                    )}
-                                    {isActivities && (
-                                        <div className="bg-red-600/90 backdrop-blur rounded-full px-2 py-0.5 w-fit flex items-center gap-1 shadow-lg border border-red-400/50">
-                                            <Gamepad2 className="w-3 h-3 text-white fill-white" />
-                                            <span className="text-[9px] font-bold text-white">ACTIVITIES</span>
-                                        </div>
-                                    )}
-                                    {room.isHot && !isOfficial && !isActivities && (
-                                        <div className="bg-red-600/90 backdrop-blur rounded-full px-2 py-0.5 w-fit flex items-center gap-1 shadow-lg border border-red-500/30">
-                                            <Flame className="w-3 h-3 text-white fill-white animate-pulse" />
-                                            <span className="text-[10px] font-bold text-white">HOT</span>
-                                        </div>
-                                    )}
-                                </div>
 
-                                <div className="absolute bottom-3 left-3 right-3 pointer-events-none">
-                                    <h3 className="font-bold text-sm truncate text-right rtl:text-right ltr:text-left text-white drop-shadow-md">{room.title}</h3>
-                                    
-                                    <div className="flex justify-between items-end mt-1">
-                                        <div className="flex items-center gap-1 text-[10px] text-gray-300 bg-black/40 px-1.5 py-0.5 rounded-lg backdrop-blur-sm">
-                                            <Users className="w-3 h-3 text-brand-400" />
-                                            <span>{room.viewerCount}</span>
+                                        {/* Status Tags */}
+                                        <div className="absolute top-2 left-2 flex flex-col gap-1 items-start pointer-events-none">
+                                            {isOfficial && (
+                                                <div className="bg-blue-600/90 backdrop-blur rounded-full px-2 py-0.5 w-fit flex items-center gap-1 shadow-lg border border-blue-400/50">
+                                                    <BadgeCheck className="w-3 h-3 text-white fill-blue-600" />
+                                                    <span className="text-[9px] font-bold text-white">OFFICIAL</span>
+                                                </div>
+                                            )}
+                                            {isActivities && (
+                                                <div className="bg-red-600/90 backdrop-blur rounded-full px-2 py-0.5 w-fit flex items-center gap-1 shadow-lg border border-red-400/50">
+                                                    <Gamepad2 className="w-3 h-3 text-white fill-white" />
+                                                    <span className="text-[9px] font-bold text-white">ACTIVITIES</span>
+                                                </div>
+                                            )}
+                                            {room.isHot && !isOfficial && !isActivities && (
+                                                <div className="bg-red-600/90 backdrop-blur rounded-full px-2 py-0.5 w-fit flex items-center gap-1 shadow-lg border border-red-500/30">
+                                                    <Flame className="w-3 h-3 text-white fill-white animate-pulse" />
+                                                    <span className="text-[10px] font-bold text-white">HOT</span>
+                                                </div>
+                                            )}
                                         </div>
-                                        <span className="text-[9px] text-gray-400 truncate max-w-[60px] flex items-center gap-1">
-                                            {isOfficial && <BadgeCheck className="w-3 h-3 text-blue-500 fill-white"/>}
-                                            {room.hostName}
-                                        </span>
+
+                                        <div className="absolute bottom-3 left-3 right-3 pointer-events-none">
+                                            <h3 className="font-bold text-sm truncate text-right rtl:text-right ltr:text-left text-white drop-shadow-md">{room.title}</h3>
+                                            
+                                            <div className="flex justify-between items-end mt-1">
+                                                <div className="flex items-center gap-1 text-[10px] text-gray-300 bg-black/40 px-1.5 py-0.5 rounded-lg backdrop-blur-sm">
+                                                    <Users className="w-3 h-3 text-brand-400" />
+                                                    <span>{room.viewerCount}</span>
+                                                </div>
+                                                <span className="text-[9px] text-gray-400 truncate max-w-[60px] flex items-center gap-1">
+                                                    {isOfficial && <BadgeCheck className="w-3 h-3 text-blue-500 fill-white"/>}
+                                                    {room.hostName}
+                                                </span>
+                                            </div>
+                                        </div>
                                     </div>
                                 </div>
-                            </div>
-                        </div>
-                    );
-                })}
-            </div>
+                            );
+                        })}
+                    </div>
+                ) : (
+                    // NEW LUXURIOUS GLASS LIST VIEW
+                    <div className="flex flex-col space-y-3 animate-in slide-in-from-bottom-2 duration-500">
+                        {filteredRooms.map((room) => {
+                            const isOfficial = room.isOfficial;
+                            const isActivities = room.isActivities;
+                            
+                            return (
+                                <div 
+                                    key={room.id}
+                                    onClick={() => handleRoomClick(room)}
+                                    className={`relative flex items-center w-full bg-gray-800/40 backdrop-blur-xl border ${room.isHot ? 'border-orange-500/30' : 'border-white/10'} rounded-2xl p-2 cursor-pointer active:scale-[0.98] transition-transform overflow-hidden group`}
+                                >
+                                    {/* Thumbnail Square */}
+                                    <div className="relative w-20 h-20 shrink-0">
+                                        <img src={room.thumbnail} className="w-full h-full object-cover rounded-xl shadow-lg border border-white/5" />
+                                        
+                                        {/* Music Wave Animation - Top Right of Thumbnail */}
+                                        <div className="absolute top-1 right-1 flex items-end gap-0.5 z-20 pointer-events-none">
+                                            <div className="w-0.5 h-2 bg-brand-400 rounded-full animate-[pulse_0.6s_ease-in-out_infinite]"></div>
+                                            <div className="w-0.5 h-3 bg-brand-400 rounded-full animate-[pulse_0.8s_ease-in-out_infinite]"></div>
+                                            <div className="w-0.5 h-2 bg-brand-400 rounded-full animate-[pulse_1s_ease-in-out_infinite]"></div>
+                                        </div>
+
+                                        {room.isLocked && (
+                                            <div className="absolute inset-0 bg-black/50 flex items-center justify-center rounded-xl">
+                                                <Lock className="w-6 h-6 text-white/80" />
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    {/* Content */}
+                                    <div className="flex-1 px-4 flex flex-col justify-center min-w-0">
+                                        <div className="flex items-center gap-1.5 mb-1">
+                                            <h3 className="font-bold text-white text-base truncate leading-tight">{room.title}</h3>
+                                        </div>
+                                        
+                                        <div className="flex items-center gap-2 mb-1.5">
+                                            <img src={room.hostAvatar} className="w-4 h-4 rounded-full border border-gray-500" />
+                                            <span className="text-xs text-gray-300 truncate">{room.hostName}</span>
+                                        </div>
+
+                                        <div className="flex items-center gap-2 mb-1.5">
+                                            {/* Viewer Count & Badges Container */}
+                                            <div className="bg-black/40 px-2 py-0.5 rounded-lg border border-white/5 flex items-center gap-1.5">
+                                                <div className="flex items-center gap-1 border-l border-white/10 pl-1 ml-1 rtl:border-r rtl:border-l-0 rtl:pl-0 rtl:pr-1 rtl:mr-1">
+                                                    <Users className="w-3 h-3 text-brand-400" />
+                                                    <span className="text-[10px] text-gray-300 font-mono">{room.viewerCount}</span>
+                                                </div>
+                                                
+                                                {/* Status Badges Moved Here */}
+                                                {isOfficial && <BadgeCheck className="w-4 h-4 text-blue-500 fill-white shrink-0" />}
+                                                {isActivities && <Gamepad2 className="w-4 h-4 text-red-500 fill-white shrink-0" />}
+                                                {room.isHot && !isOfficial && !isActivities && <Flame className="w-4 h-4 text-orange-500 fill-orange-500 animate-pulse shrink-0" />}
+                                            </div>
+
+                                            {room.tags && room.tags.length > 0 && (
+                                                <span className="text-[10px] text-gray-500 bg-white/5 px-2 py-0.5 rounded-lg border border-white/5">
+                                                    #{room.tags[0]}
+                                                </span>
+                                            )}
+                                        </div>
+
+                                        {/* Description in Luxurious Glass Frame */}
+                                        {room.description && (
+                                            <div className="bg-gradient-to-r from-white/5 to-transparent border border-white/10 rounded-lg px-2 py-1 backdrop-blur-md w-fit max-w-full flex items-center gap-1.5">
+                                                <Info className="w-3 h-3 text-brand-400/80 shrink-0" />
+                                                <p className="text-[9px] text-gray-300 truncate font-medium leading-none max-w-[150px]">
+                                                    {room.description}
+                                                </p>
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    {/* Action/Enter Arrow */}
+                                    <div className="pl-2">
+                                        <button className="p-2 bg-white/5 rounded-full text-gray-400 hover:bg-brand-600 hover:text-white transition">
+                                            {language === 'ar' ? <ChevronLeft className="w-5 h-5"/> : <ChevronRight className="w-5 h-5"/>}
+                                        </button>
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+                )}
+            </>
         )}
       </div>
 
@@ -417,6 +567,37 @@ const HomeView: React.FC<HomeViewProps> = ({ rooms, onJoinRoom, language, userPr
                               {creating ? '...' : t('create')}
                           </button>
                       </div>
+                  </div>
+              </div>
+          </div>
+      )}
+
+      {/* PASSWORD MODAL FOR LOCKED ROOMS */}
+      {passwordModalRoom && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in">
+              <div className="bg-gray-900 border border-gray-700 rounded-3xl w-full max-w-xs shadow-2xl p-6 relative">
+                  <button onClick={() => setPasswordModalRoom(null)} className="absolute top-4 right-4 text-gray-400"><X className="w-5 h-5"/></button>
+                  
+                  <div className="flex flex-col items-center gap-4">
+                      <div className="w-16 h-16 bg-gray-800 rounded-full flex items-center justify-center border-2 border-dashed border-gray-600">
+                          <Lock className="w-8 h-8 text-gray-400" />
+                      </div>
+                      <h3 className="text-white font-bold text-lg">{t('privateRoom')}</h3>
+                      <input 
+                          type="password" 
+                          placeholder={t('enterPass')}
+                          value={passwordInput}
+                          onChange={(e) => setPasswordInput(e.target.value)}
+                          maxLength={6}
+                          className="w-full bg-black/50 border border-gray-600 rounded-xl py-3 px-4 text-center text-white tracking-widest text-lg focus:border-brand-500 outline-none"
+                      />
+                      <button 
+                          onClick={submitPassword}
+                          disabled={passwordInput.length < 6}
+                          className="w-full py-3 bg-brand-600 hover:bg-brand-500 text-white rounded-xl font-bold disabled:opacity-50"
+                      >
+                          {t('join')}
+                      </button>
                   </div>
               </div>
           </div>

@@ -1,12 +1,13 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { ArrowLeft, Send, Heart, Share2, Gift as GiftIcon, Users, Crown, Mic, MicOff, Lock, Unlock, Settings, Image as ImageIcon, X, Info, Minimize2, LogOut, BadgeCheck, Loader2, Upload, Shield, Trophy, Bot, Volume2, VolumeX, ArrowDownCircle, Ban, Trash2, UserCog, UserMinus, Zap, BarChart3, Gamepad2, Clock, LayoutGrid, Flag } from 'lucide-react';
+import { ArrowLeft, Send, Heart, Share2, Gift as GiftIcon, Users, Crown, Mic, MicOff, Lock, Unlock, Settings, Image as ImageIcon, X, Info, Minimize2, LogOut, BadgeCheck, Loader2, Upload, Shield, Trophy, Bot, Volume2, VolumeX, ArrowDownCircle, Ban, Trash2, UserCog, UserMinus, Zap, BarChart3, Gamepad2, Clock, LayoutGrid, Flag, Music, Play, Pause, SkipForward, SkipBack, Hexagon, ListMusic, Plus, Check, Search, Circle, CheckCircle2, KeyRound } from 'lucide-react';
 import { Room, ChatMessage, Gift, Language, User, RoomSeat } from '../types';
 import { GIFTS, STORE_ITEMS, ROOM_BACKGROUNDS, VIP_TIERS, ADMIN_ROLES } from '../constants';
-import { listenToMessages, sendMessage, takeSeat, leaveSeat, updateRoomDetails, sendGiftTransaction, toggleSeatLock, toggleSeatMute, decrementViewerCount, listenToRoom, kickUserFromSeat, banUserFromRoom, unbanUserFromRoom, removeRoomAdmin, addRoomAdmin, searchUserByDisplayId, enterRoom, exitRoom, listenToRoomViewers } from '../services/firebaseService';
-import { joinVoiceChannel, leaveVoiceChannel, toggleMicMute, publishMicrophone, unpublishMicrophone, toggleAllRemoteAudio, listenToVolume } from '../services/agoraService';
+import { listenToMessages, sendMessage, takeSeat, leaveSeat, updateRoomDetails, sendGiftTransaction, toggleSeatLock, toggleSeatMute, decrementViewerCount, listenToRoom, kickUserFromSeat, banUserFromRoom, unbanUserFromRoom, removeRoomAdmin, addRoomAdmin, searchUserByDisplayId, enterRoom, exitRoom, listenToRoomViewers, getUserProfile } from '../services/firebaseService';
+import { joinVoiceChannel, leaveVoiceChannel, toggleMicMute, publishMicrophone, unpublishMicrophone, toggleAllRemoteAudio, listenToVolume, playMusicFile, stopMusic, setMusicVolume, seekMusic, pauseMusic, resumeMusic, getMusicTrack } from '../services/agoraService';
 import { generateAiHostResponse } from '../services/geminiService';
 import { compressImage } from '../services/imageService';
+import { saveSongToDB, getSongsFromDB, deleteSongFromDB, SavedSong } from '../services/musicStorageService';
 import UserProfileModal from './UserProfileModal';
 import RoomLeaderboard from './RoomLeaderboard';
 import FullProfileView from './FullProfileView';
@@ -16,6 +17,20 @@ interface RoomViewProps {
   currentUser: User;
   onAction: (action: 'minimize' | 'leave' | 'chat', data?: any) => void;
   language: Language;
+}
+
+interface Song {
+    id: string;
+    file: File | Blob;
+    name: string;
+    duration: number;
+}
+
+interface StagedFile {
+    id: string;
+    file: File;
+    name: string;
+    selected: boolean;
 }
 
 export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUser, onAction, language }) => {
@@ -28,7 +43,8 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
   const [showGiftPanel, setShowGiftPanel] = useState(false);
   const [giftTab, setGiftTab] = useState<'static' | 'animated'>('static');
   const [selectedGift, setSelectedGift] = useState<Gift | null>(null);
-  const [giftTarget, setGiftTarget] = useState<'all' | 'me' | string>('all'); 
+  const [giftTargets, setGiftTargets] = useState<string[]>(['all']); 
+  const [giftMultiplier, setGiftMultiplier] = useState<number>(1);
   const [isSendingGift, setIsSendingGift] = useState(false);
 
   // Animation State
@@ -42,6 +58,19 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
   const [showUserList, setShowUserList] = useState(false);
   const [showLeaderboard, setShowLeaderboard] = useState(false);
   const [showOptionsMenu, setShowOptionsMenu] = useState(false);
+  
+  // --- Music Player State ---
+  const [showMusicMiniPlayer, setShowMusicMiniPlayer] = useState(false);
+  const [showMusicPlaylist, setShowMusicPlaylist] = useState(false);
+  const [showImportView, setShowImportView] = useState(false);
+  const [stagedFiles, setStagedFiles] = useState<StagedFile[]>([]);
+  const [importSearch, setImportSearch] = useState('');
+  const [playlist, setPlaylist] = useState<Song[]>([]);
+  const [currentSong, setCurrentSong] = useState<Song | null>(null);
+  const [isMusicPlaying, setIsMusicPlaying] = useState(false);
+  const [musicVolume, setMusicVolumeState] = useState(70);
+  const [musicProgress, setMusicProgress] = useState(0);
+  const [musicDuration, setMusicDuration] = useState(0);
   
   const [selectedUser, setSelectedUser] = useState<RoomSeat | null>(null);
   const [fullProfileUser, setFullProfileUser] = useState<User | null>(null);
@@ -63,6 +92,15 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
   const [showBanDurationModal, setShowBanDurationModal] = useState(false);
   const [userToBan, setUserToBan] = useState<string | null>(null);
 
+  // Lock Room State
+  const [showLockSetupModal, setShowLockSetupModal] = useState(false);
+  const [newRoomPassword, setNewRoomPassword] = useState('');
+
+  // Settings Lists Data
+  const [adminProfiles, setAdminProfiles] = useState<User[]>([]);
+  const [bannedProfiles, setBannedProfiles] = useState<User[]>([]);
+  const [loadingProfiles, setLoadingProfiles] = useState(false);
+
   // New: Active Viewer List State
   const [viewers, setViewers] = useState<User[]>([]);
   const viewersRef = useRef<User[]>([]);
@@ -79,6 +117,76 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
 
   const currentUserRef = useRef(currentUser);
   useEffect(() => { currentUserRef.current = currentUser; }, [currentUser]);
+
+  // Load Saved Music on Mount
+  useEffect(() => {
+      const loadMusic = async () => {
+          const savedSongs = await getSongsFromDB();
+          if (savedSongs.length > 0) {
+              setPlaylist(savedSongs);
+          }
+      };
+      loadMusic();
+  }, []);
+
+  // Music Timer
+  useEffect(() => {
+      let interval: any;
+      if (isMusicPlaying) {
+          interval = setInterval(() => {
+              const track = getMusicTrack();
+              if (track) {
+                  setMusicProgress(track.getCurrentTime());
+                  if (track.duration && track.duration !== musicDuration) {
+                      setMusicDuration(track.duration);
+                  }
+                  if (track.duration > 0 && track.getCurrentTime() >= track.duration) {
+                      setIsMusicPlaying(false);
+                  }
+              }
+          }, 1000);
+      }
+      return () => clearInterval(interval);
+  }, [isMusicPlaying, musicDuration]);
+
+  // Settings Tab Data Fetcher
+  useEffect(() => {
+      const fetchSettingsData = async () => {
+          if (!showRoomSettings) return;
+          
+          if (settingsTab === 'admins') {
+              setLoadingProfiles(true);
+              const profiles: User[] = [];
+              if (room.admins && room.admins.length > 0) {
+                  for (const uid of room.admins) {
+                      // Try find in viewers first for speed
+                      let user = viewers.find(v => v.uid === uid);
+                      if (!user) {
+                          user = await getUserProfile(uid) || undefined;
+                      }
+                      if (user) profiles.push(user);
+                  }
+              }
+              setAdminProfiles(profiles);
+              setLoadingProfiles(false);
+          }
+
+          if (settingsTab === 'banned') {
+              setLoadingProfiles(true);
+              const profiles: User[] = [];
+              if (room.bannedUsers && Object.keys(room.bannedUsers).length > 0) {
+                  for (const uid of Object.keys(room.bannedUsers)) {
+                      let user = await getUserProfile(uid);
+                      if (user) profiles.push(user);
+                  }
+              }
+              setBannedProfiles(profiles);
+              setLoadingProfiles(false);
+          }
+      };
+
+      fetchSettingsData();
+  }, [settingsTab, showRoomSettings, room.admins, room.bannedUsers, viewers]);
 
   const isHost = room.hostId === currentUser.id;
   const isRoomAdmin = room.admins?.includes(currentUser.uid!);
@@ -107,19 +215,29 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
 
   const activeSeats = seats.filter(s => s.userId);
 
+  // --- LIFECYCLE MANAGEMENT: ENTRY, EXIT, VOICE ---
   useEffect(() => {
-      const uid = currentUser.uid || currentUser.id;
-      if (uid) {
-          joinVoiceChannel(room.id, uid);
+      const uid = currentUser.uid;
+      const agoraUid = currentUser.uid || currentUser.id;
+
+      // 1. Join Agora Voice
+      if (agoraUid) {
+          joinVoiceChannel(room.id, agoraUid);
       }
 
-      if (currentUser.uid) {
+      // 2. Firebase Enter (Update Real-Time Viewer Count)
+      if (uid) {
           enterRoom(room.id, currentUser);
       }
 
       return () => {
+          if (uid) {
+              exitRoom(room.id, uid);
+          }
+          leaveVoiceChannel();
+          stopMusic();
       };
-  }, [room.id]);
+  }, [room.id]); 
 
   useEffect(() => {
       const unsub = listenToRoomViewers(room.id, (v) => {
@@ -183,6 +301,8 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
       const unsubscribe = listenToRoom(initialRoom.id, (updatedRoom) => {
           if (updatedRoom) {
               setRoom(prevRoom => {
+                  // Only update seats if they fundamentally changed from server to avoid stutter
+                  // But accept Optimistic updates usually
                   const existingSeats = updatedRoom.seats || [];
                   const adjustedSeats = Array(11).fill(null).map((_, i) => existingSeats[i] || { 
                       index: i, 
@@ -212,12 +332,12 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
                   setIsAiEnabled(updatedRoom.isAiHost || false);
               }
 
-              // Check if I am banned
               const myUid = currentUser.uid!;
               if (updatedRoom.bannedUsers && updatedRoom.bannedUsers[myUid]) {
                   const expiry = updatedRoom.bannedUsers[myUid];
                   if (expiry === -1 || expiry > Date.now()) {
-                      alert(language === 'ar' ? 'لقد تم طردك من الغرفة' : 'You have been kicked/banned from the room');
+                      let banMsg = language === 'ar' ? 'لقد تم طردك من الغرفة.' : 'You have been kicked/banned from the room.';
+                      alert(banMsg);
                       onAction('leave');
                   }
               }
@@ -238,13 +358,14 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
           publishMicrophone(!!mySeatMuted).catch(err => {
               console.warn("Mic publish info:", err);
           });
+          // Clear loading immediately once seated logic is detected
           if (loadingSeatIndex === mySeatIndex) setLoadingSeatIndex(null);
       } else {
           if (loadingSeatIndex === null) {
               unpublishMicrophone().catch(err => console.warn("Mic unpublish info:", err));
           }
       }
-  }, [amISeated, mySeatMuted, loadingSeatIndex]);
+  }, [amISeated, mySeatMuted, loadingSeatIndex, mySeatIndex]);
 
   useEffect(() => {
      if (!room || !room.id) return;
@@ -274,6 +395,12 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
          if (unsubscribe) unsubscribe();
      };
   }, [room?.id]);
+
+  useEffect(() => {
+      return () => {
+          stopMusic();
+      };
+  }, []);
 
   const triggerAnimation = (icon: string, animationClass: string = 'animate-bounce-in') => {
       const id = Math.random().toString(36).substr(2, 9);
@@ -306,6 +433,8 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
                   timestamp: Date.now(),
                   vipLevel: 0
               };
+              // Add Optimistic AI Message
+              setMessages(prev => [...prev, aiMsg]);
               await sendMessage(room.id, aiMsg);
           } catch (e) { console.error("AI Host Error:", e); }
       };
@@ -372,9 +501,139 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
       confirmBan: { ar: 'تأكيد الطرد', en: 'Confirm Ban' },
       menu: { ar: 'القائمة', en: 'Menu' },
       report: { ar: 'إبلاغ', en: 'Report' },
-      share: { ar: 'مشاركة', en: 'Share' }
+      share: { ar: 'مشاركة', en: 'Share' },
+      music: { ar: 'الموسيقى', en: 'Music' },
+      chooseMusic: { ar: 'اختر موسيقى', en: 'Choose Music' },
+      uploadMusic: { ar: 'رفع الموسيقى', en: 'Upload Music' },
+      musicVolume: { ar: 'مستوى الصوت', en: 'Volume' },
+      localMusic: { ar: 'الموسيقى المحلية', en: 'Local Music' },
+      playlist: { ar: 'قائمة الموسيقى', en: 'Playlist' },
+      addMusic: { ar: 'إضافة موسيقى', en: 'Add Music' },
+      edit: { ar: 'تعديل', en: 'Edit' },
+      noMusic: { ar: 'لا توجد موسيقى. اضف من جهازك', en: 'No music. Add from device' },
+      all: { ar: 'الكل', en: 'All' },
+      multiplier: { ar: 'الكمية', en: 'Quantity' },
+      selectTarget: { ar: 'اختر مستلم', en: 'Select Target' },
+      importTitle: { ar: 'استيراد الموسيقى', en: 'Import Music' },
+      selectFiles: { ar: 'اختر ملفات من الجهاز', en: 'Select Files from Device' },
+      searchMusic: { ar: 'بحث عن اغنية...', en: 'Search song...' },
+      selectAll: { ar: 'تحديد الكل', en: 'Select All' },
+      confirmImport: { ar: 'تأكيد وإضافة', en: 'Confirm & Add' },
+      importDesc: { ar: 'اختر الملفات التي تريد إضافتها لقائمة التشغيل الخاصة بك', en: 'Select files to add to your playlist' },
+      lockRoom: { ar: 'قفل الروم', en: 'Lock Room' },
+      unlockRoom: { ar: 'فتح الروم', en: 'Unlock Room' },
+      setPassword: { ar: 'تعيين كلمة مرور للروم', en: 'Set Room Password' },
+      passPlaceholder: { ar: '6 أرقام (مثال: 123456)', en: '6 Digits (e.g., 123456)' },
+      confirm: { ar: 'تأكيد', en: 'Confirm' }
     };
     return dict[key]?.[language] || key;
+  };
+
+  // ... (Import Logic methods remain same) ...
+  const handleInitialFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+      const files = e.target.files;
+      if (files && files.length > 0) {
+          const newStaged: StagedFile[] = [];
+          for (let i = 0; i < files.length; i++) {
+              const file = files[i];
+              newStaged.push({
+                  id: Math.random().toString(36).substr(2, 9),
+                  file: file,
+                  name: file.name.replace(/\.[^/.]+$/, ""),
+                  selected: true
+              });
+          }
+          setStagedFiles(prev => [...prev, ...newStaged]);
+          e.target.value = '';
+      }
+  };
+
+  const toggleStagedFile = (id: string) => {
+      setStagedFiles(prev => prev.map(f => f.id === id ? { ...f, selected: !f.selected } : f));
+  };
+
+  const selectAllStaged = () => {
+      const allSelected = stagedFiles.every(f => f.selected);
+      setStagedFiles(prev => prev.map(f => ({ ...f, selected: !allSelected })));
+  };
+
+  const confirmImport = async () => {
+      const selected = stagedFiles.filter(f => f.selected);
+      if (selected.length === 0) return;
+
+      const newSongs: Song[] = [];
+      for (const staged of selected) {
+          const song = {
+              id: staged.id,
+              file: staged.file,
+              name: staged.name,
+              duration: 0
+          };
+          newSongs.push(song);
+          await saveSongToDB(song);
+      }
+      
+      setPlaylist(prev => [...prev, ...newSongs]);
+      if (!currentSong && newSongs.length > 0) {
+          playSong(newSongs[0]);
+      }
+      
+      setStagedFiles([]);
+      setShowImportView(false);
+      setShowMusicPlaylist(true);
+  };
+
+  const handleDeleteSong = async (id: string, e: React.MouseEvent) => {
+      e.stopPropagation();
+      if (!confirm("Remove this song?")) return;
+      await deleteSongFromDB(id);
+      setPlaylist(prev => prev.filter(s => s.id !== id));
+      if (currentSong?.id === id) {
+          stopMusic();
+          setIsMusicPlaying(false);
+          setCurrentSong(null);
+      }
+  };
+
+  const playSong = async (song: Song) => {
+      try {
+          setCurrentSong(song);
+          await playMusicFile(song.file as File);
+          setIsMusicPlaying(true);
+          setMusicVolumeState(70);
+          setMusicVolume(70);
+      } catch (error) {
+          console.error("Music play error", error);
+          alert("Error playing music file");
+      }
+  };
+
+  const toggleMusicPlay = () => {
+      if (isMusicPlaying) {
+          pauseMusic();
+          setIsMusicPlaying(false);
+      } else {
+          resumeMusic();
+          setIsMusicPlaying(true);
+      }
+  };
+
+  const handleMusicSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
+      const val = parseFloat(e.target.value);
+      setMusicProgress(val);
+      seekMusic(val);
+  };
+
+  const handleMusicVolumeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+      const val = parseInt(e.target.value);
+      setMusicVolumeState(val);
+      setMusicVolume(val);
+  };
+
+  const formatTime = (seconds: number) => {
+      const mins = Math.floor(seconds / 60);
+      const secs = Math.floor(seconds % 60);
+      return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
   };
 
   const handleSendMessage = async () => {
@@ -391,8 +650,31 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
       vipLevel: currentUser.vipLevel || 0,
       adminRole: currentUser.adminRole || null
     };
+    
+    // OPTIMISTIC UPDATE: Add message immediately to state
+    setMessages(prev => [userMsg, ...prev]);
     setInputValue('');
+    
     try { await sendMessage(room.id, userMsg); } catch (e) { }
+  };
+
+  const toggleGiftTarget = (uid: string) => {
+      if (uid === 'all') {
+          setGiftTargets(['all']);
+          return;
+      }
+      
+      let newTargets = [...giftTargets];
+      if (newTargets.includes('all')) newTargets = [];
+
+      if (newTargets.includes(uid)) {
+          newTargets = newTargets.filter(id => id !== uid);
+      } else {
+          newTargets.push(uid);
+      }
+
+      if (newTargets.length === 0) setGiftTargets(['all']);
+      else setGiftTargets(newTargets);
   };
 
   const executeSendGift = async () => {
@@ -401,43 +683,58 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
         return;
     }
     if (isSendingGift) return;
+    if (giftTargets.length === 0) {
+        alert(t('selectTarget'));
+        return;
+    }
     
     if (!currentUser.uid || currentUser.uid === 'guest') {
         alert("Please login first");
         return;
     }
 
+    const multiplier = giftMultiplier;
+    
+    const targets = giftTargets.includes('all') 
+        ? activeSeats 
+        : activeSeats.filter(s => s.userId && giftTargets.includes(s.userId));
+
+    if (targets.length === 0 && !giftTargets.includes('all')) {
+        alert("Selected users are no longer on mic");
+        return;
+    }
+
+    const totalCost = selectedGift.cost * multiplier * (giftTargets.includes('all') ? activeSeats.length : targets.length);
+
     const userBalance = currentUser.wallet?.diamonds || 0;
-    if (userBalance < selectedGift.cost) {
+    if (userBalance < totalCost) {
         alert(t('noFunds'));
         return;
     }
 
     setIsSendingGift(true);
 
-    let targetName = t('everyone');
-    let targetSeatIndex = 0; 
-
-    if (giftTarget === 'me') {
-        targetName = t('me');
-        if (mySeat) targetSeatIndex = mySeat.index;
-    } else if (giftTarget !== 'all') {
-        const targetSeat = seats.find(s => s.userId === giftTarget);
-        if (targetSeat) {
-            targetName = targetSeat.userName || 'User';
-            targetSeatIndex = targetSeat.index;
-        }
-    }
-
     try {
-        await sendGiftTransaction(room.id, currentUser.uid, targetSeatIndex, selectedGift.cost, selectedGift.id);
+        const promises = targets.map(seat => 
+            sendGiftTransaction(room.id, currentUser.uid!, seat.index, selectedGift.cost * multiplier, selectedGift.id)
+        );
+        await Promise.all(promises);
         
+        let targetName = '';
+        if (giftTargets.includes('all')) {
+            targetName = t('everyone');
+        } else if (targets.length === 1) {
+            targetName = targets[0].userName || 'User';
+        } else {
+            targetName = `${targets.length} Users`;
+        }
+
         const giftMsg: ChatMessage = {
           id: Date.now().toString(),
           userId: currentUser.id,
           userName: currentUser.name,
           userAvatar: currentUser.avatar || 'https://picsum.photos/200',
-          text: `Sent ${selectedGift.name} ${selectedGift.icon} to ${targetName} x1`,
+          text: `Sent ${selectedGift.name} x${multiplier} to ${targetName} 🎁`,
           isGift: true,
           giftType: selectedGift.type,
           giftIcon: selectedGift.icon,
@@ -448,6 +745,10 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
           adminRole: currentUser.adminRole || null
         };
         
+        // Optimistic
+        setMessages(prev => [giftMsg, ...prev]);
+        await sendMessage(room.id, giftMsg);
+        
         if (selectedGift.type === 'animated') {
             triggerAnimation(selectedGift.icon, selectedGift.animationClass);
         } else {
@@ -455,7 +756,6 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
         }
 
         setShowGiftPanel(false);
-        await sendMessage(room.id, giftMsg);
 
     } catch (e: any) {
         const msg = typeof e === 'string' ? e : (e.message || '');
@@ -494,9 +794,36 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
       setSeatToConfirm(null); 
       setLoadingSeatIndex(index); 
       
+      // OPTIMISTIC UI: Update seat locally immediately
+      setRoom(prev => {
+          const newSeats = [...prev.seats];
+          // Remove user from any other seat if they are moving
+          const oldSeatIdx = newSeats.findIndex(s => s.userId === currentUser.id);
+          if (oldSeatIdx !== -1) {
+              newSeats[oldSeatIdx] = { ...newSeats[oldSeatIdx], userId: null, userName: null, userAvatar: null, frameId: null };
+          }
+          // Put user on new seat
+          newSeats[index] = {
+              ...newSeats[index],
+              userId: currentUser.id,
+              userName: currentUser.name,
+              userAvatar: currentUser.avatar,
+              frameId: currentUser.equippedFrame || null, // Ensure frame shows immediately
+              isMuted: false,
+              isLocked: newSeats[index].isLocked,
+              giftCount: 0
+          };
+          return { ...prev, seats: newSeats };
+      });
+
+      // Immediately trigger mic state locally for responsiveness
+      publishMicrophone(false).catch(err => console.warn(err));
+
       try { 
           await takeSeat(room.id, index, currentUser); 
       } catch (e) { 
+          // Revert if failed (Basic revert, full sync happens via onSnapshot anyway)
+          console.error("Take seat failed", e);
           setLoadingSeatIndex(null); 
       }
   };
@@ -519,22 +846,13 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
   };
 
   const handleLeaveRoomAction = () => {
+      unpublishMicrophone();
+      
+      if (isSeatedRef.current && currentUserRef.current) {
+          leaveSeat(room.id, currentUserRef.current).catch(err => console.warn(err));
+      }
+
       onAction('leave');
-      const performCleanup = async () => {
-          try {
-              if (isSeatedRef.current && currentUserRef.current) {
-                  await leaveSeat(room.id, currentUserRef.current);
-              }
-              if (currentUserRef.current.uid) {
-                  await exitRoom(room.id, currentUserRef.current.uid);
-              }
-          } catch (e) {
-              console.error("Background cleanup error:", e);
-          }
-          unpublishMicrophone();
-          leaveVoiceChannel();
-      };
-      performCleanup();
   };
 
   const handleToggleMyMute = async () => {
@@ -571,18 +889,35 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
   const handleBgUpload = async (e: React.ChangeEvent<HTMLInputElement>, type: 'inner' | 'outer') => {
       const file = e.target.files?.[0];
       if (file) {
+          const isGif = file.type === 'image/gif';
+          const MAX_FILE_SIZE = isGif ? 750 * 1024 : 5 * 1024 * 1024; 
+
+          if (isGif && file.size > MAX_FILE_SIZE) { 
+               alert(language === 'ar' ? "حجم الملف المتحرك (GIF) كبير جداً. يرجى اختيار ملف أقل من 750 كيلوبايت لضمان الحفظ." : "GIF file too large. Please choose a file under 750KB to ensure saving.");
+               return;
+          }
+
           try {
-              // Use higher resolution (1280) and quality (0.8) for better detail
-              // while still compressing to fit within Firestore limits.
-              const compressed = await compressImage(file, 1280, 0.8);
-              if (type === 'inner') {
-                  handleUpdateRoom({ backgroundImage: compressed });
-              } else {
-                  handleUpdateRoom({ thumbnail: compressed });
+              const isOuter = type === 'outer';
+              const compressed = await compressImage(file, 1280, 0.8, isOuter);
+              
+              if (compressed.length > 1000000) { 
+                  alert(language === 'ar' ? "الصورة بعد المعالجة لا تزال كبيرة جداً. حاول استخدام صورة أصغر أو ثابتة." : "Processed image is still too large. Please try a smaller or static image.");
+                  return;
               }
-          } catch (error) {
-              console.error("Image processing failed", error);
-              alert(language === 'ar' ? "فشل معالجة الصورة. يرجى اختيار صورة أخرى." : "Image processing failed. Please try another image.");
+
+              if (isOuter) {
+                  await handleUpdateRoom({ thumbnail: compressed });
+              } else {
+                  await handleUpdateRoom({ backgroundImage: compressed });
+              }
+          } catch (error: any) {
+              console.error("Image processing/upload failed", error);
+              if (error.code === 'resource-exhausted' || error.message?.includes('too large') || error.toString().includes('too large')) {
+                   alert(language === 'ar' ? "فشل الحفظ: حجم البيانات كبير جداً (تجاوز الحد المسموح)." : "Save failed: Data too large (exceeded limit).");
+              } else {
+                   alert(language === 'ar' ? "فشل تحديث الصورة." : "Failed to update image.");
+              }
           }
       }
   };
@@ -598,12 +933,8 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
       setSelectedUser(null);
   };
 
-  // Triggered when user clicks "Ban" on profile modal
   const handleBanRequest = (userId: string) => {
       if (userId === currentUser.id) return;
-      // Resolve UID from displayId if needed, assume userToBan uses UID
-      // For simplicity in this logic, we pass DisplayID but in real scenario we need UID.
-      // Assuming userId passed here is UID because selectedUser logic tries to resolve it.
       setUserToBan(userId);
       setSelectedUser(null);
       setShowBanDurationModal(true);
@@ -614,11 +945,9 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
       const uid = userToBan;
       pendingBannedUsers.current.add(uid);
       
-      // Remove from seat if seated
       const targetSeat = seats.find(s => s.userId === uid || (s as any).uid === uid);
       if (targetSeat) handleKickSeat(targetSeat.index);
 
-      // Optimistic update
       const expiry = durationInMinutes === -1 ? -1 : Date.now() + (durationInMinutes * 60 * 1000);
       setRoom(prev => ({ 
           ...prev, 
@@ -630,9 +959,51 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
       setUserToBan(null);
   };
 
-  const handleUnbanUser = async (userId: string) => await unbanUserFromRoom(room.id, userId);
-  const handleMakeAdmin = async (userId: string) => { await addRoomAdmin(room.id, userId); setSelectedUser(null); };
-  const handleRemoveAdmin = async (userId: string) => { await removeRoomAdmin(room.id, userId); setSelectedUser(null); };
+  const handleUnbanUser = async (userId: string) => {
+      await unbanUserFromRoom(room.id, userId);
+      setBannedProfiles(prev => prev.filter(u => u.uid !== userId));
+  };
+
+  const handleMakeAdmin = async (userUid: string, userName: string) => { 
+      await addRoomAdmin(room.id, userUid); 
+      setSelectedUser(null); 
+      const msg: ChatMessage = {
+          id: Date.now().toString(),
+          userId: 'SYSTEM',
+          userName: 'System',
+          userAvatar: '',
+          text: `🎉 تهانينا أصبح ${userName} مسؤول عن الغرفة`,
+          timestamp: Date.now(),
+          isSystem: true
+      };
+      await sendMessage(room.id, msg);
+  };
+
+  const handleRemoveAdmin = async (userId: string) => { 
+      await removeRoomAdmin(room.id, userId); 
+      setSelectedUser(null); 
+      setAdminProfiles(prev => prev.filter(u => u.uid !== userId));
+  };
+
+  const toggleRoomLock = async () => {
+      if (room.isLocked) {
+          await updateRoomDetails(room.id, { isLocked: false, password: null });
+          setRoom(prev => ({ ...prev, isLocked: false }));
+      } else {
+          setShowLockSetupModal(true);
+          setNewRoomPassword('');
+      }
+  };
+
+  const confirmLock = async () => {
+      if (newRoomPassword.length !== 6 || isNaN(Number(newRoomPassword))) {
+          alert(language === 'ar' ? 'كلمة المرور يجب أن تكون 6 أرقام' : 'Password must be 6 digits');
+          return;
+      }
+      await updateRoomDetails(room.id, { isLocked: true, password: newRoomPassword });
+      setRoom(prev => ({ ...prev, isLocked: true }));
+      setShowLockSetupModal(false);
+  };
 
   const getFrameClass = (id?: string | null) => {
       if (!id) return 'border border-white/20';
@@ -640,7 +1011,7 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
   };
 
   const getBubbleClass = (id?: string | null) => {
-      if (!id) return 'bg-white/10 text-white rounded-2xl'; // Default bubble
+      if (!id) return 'bg-white/10 text-white rounded-2xl';
       const item = STORE_ITEMS.find(i => i.id === id);
       return item ? `${item.previewClass} rounded-2xl` : 'bg-white/10 text-white rounded-2xl';
   };
@@ -663,6 +1034,7 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
   };
 
   const selectedUserId = selectedUser?.userId;
+  const filteredStagedFiles = stagedFiles.filter(f => f.name.toLowerCase().includes(importSearch.toLowerCase()));
 
   return (
     <div className="relative h-[100dvh] w-full bg-black flex flex-col overflow-hidden">
@@ -672,7 +1044,6 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
           src={room.backgroundImage || room.thumbnail} 
           className="w-full h-full object-cover object-center opacity-100 transition-opacity duration-700" 
         />
-        {/* Adjusted Gradient Overlay: Lighter top and middle to show details clearly */}
         <div className="absolute inset-0 bg-gradient-to-b from-black/5 via-transparent to-black/60"></div>
       </div>
 
@@ -695,6 +1066,7 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
                     <div className="flex items-center gap-1">
                         <h2 className="font-bold text-xs truncate leading-tight">{room.title}</h2>
                         {room.isActivities && <Gamepad2 className="w-3 h-3 text-red-500 fill-white" />}
+                        {room.isLocked && <Lock className="w-3 h-3 text-white/70" />}
                     </div>
                     <div className="text-[9px] text-gray-200 truncate">ID: {room.displayId || room.id.slice(-6)}</div>
                 </div>
@@ -713,18 +1085,26 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
         <Trophy className="w-3 h-3"/> {t('cup')}
       </button>
 
-      {/* SEATS CONTAINER */}
       <div className="relative z-10 w-full px-2 pt-1 pb-1 shrink-0 flex flex-col items-center">
-          
-          {/* HOST SEAT */}
           <div className="flex justify-center mb-2 shrink-0">
              {seats.slice(0, 1).map((seat) => {
-                 const isSpeaking = seat.userId && speakingUsers.has(seat.userId);
+                 const isSpeaking = (seat.userId && speakingUsers.has(seat.userId)) || (isMusicPlaying && seat.userId === room.hostId);
                  return (
                  <div key={seat.index} className="flex flex-col items-center relative group">
-                    <div onClick={() => handleSeatClick(seat.index, seat.userId)} className={`w-16 h-16 rounded-full relative bg-black/40 backdrop-blur overflow-visible cursor-pointer transition transform hover:scale-105 p-[3px] ${seat.userId ? getFrameClass(seat.frameId) : 'border-2 border-white/20 border-dashed'}`}>
+                    <div onClick={() => handleSeatClick(seat.index, seat.userId)} className={`w-16 h-16 rounded-full relative bg-black/40 backdrop-blur overflow-visible cursor-pointer transition transform active:scale-95 p-[3px] ${seat.userId ? getFrameClass(seat.frameId) : 'border-2 border-white/20 border-dashed'}`}>
                          {loadingSeatIndex === seat.index ? <Loader2 className="w-6 h-6 text-brand-500 animate-spin absolute inset-0 m-auto" /> : seat.userId ? (
-                             <><img src={seat.userAvatar!} className="w-full h-full rounded-full object-cover" />{!seat.isMuted && isSpeaking && <div className="absolute inset-0 rounded-full border-2 border-brand-400 animate-ping opacity-50"></div>}{seat.isMuted && <div className="absolute inset-0 rounded-full bg-black/50 flex items-center justify-center"><MicOff className="w-4 h-4 text-red-500"/></div>}<div className="absolute -top-3 -right-1 bg-yellow-500 p-1 rounded-full"><Crown className="w-2.5 h-2.5 text-black" /></div></>
+                             <>
+                                <img src={seat.userAvatar!} className="w-full h-full rounded-full object-cover relative z-10" />
+                                {/* Beautiful Sound Wave for Host */}
+                                {!seat.isMuted && isSpeaking && (
+                                    <>
+                                        <div className="absolute inset-0 rounded-full border-4 border-brand-400 opacity-60 animate-[ping_1.5s_cubic-bezier(0,0,0.2,1)_infinite]"></div>
+                                        <div className="absolute inset-0 rounded-full border-4 border-brand-300 opacity-40 animate-[ping_2s_cubic-bezier(0,0,0.2,1)_infinite]"></div>
+                                    </>
+                                )}
+                                {seat.isMuted && <div className="absolute inset-0 rounded-full bg-black/50 flex items-center justify-center z-20"><MicOff className="w-4 h-4 text-red-500"/></div>}
+                                <div className="absolute -top-3 -right-1 bg-yellow-500 p-1 rounded-full z-20"><Crown className="w-2.5 h-2.5 text-black" /></div>
+                             </>
                          ) : <div className="text-gray-400 text-[10px] text-center w-full h-full flex items-center justify-center">{t('host')}</div>}
                     </div>
                     {seat.userId && <div className="mt-1 max-w-[60px] truncate text-[9px] text-white/90 bg-white/10 px-2 py-0.5 rounded-full">{seat.userName}</div>}
@@ -734,7 +1114,6 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
              })}
           </div>
           
-          {/* OTHER SEATS GRID */}
           <div className="grid grid-cols-5 gap-y-3 gap-x-2 justify-items-center w-full max-w-sm shrink-0">
              {seats.slice(1).map((seat) => {
                  const isSpeaking = seat.userId && speakingUsers.has(seat.userId);
@@ -742,7 +1121,17 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
                  <div key={seat.index} className="flex flex-col items-center w-full relative">
                     <div onClick={() => handleSeatClick(seat.index, seat.userId)} className={`w-12 h-12 rounded-full relative bg-black/30 backdrop-blur p-[2px] ${seat.userId ? getFrameClass(seat.frameId) : 'border border-white/10 border-dashed'} flex items-center justify-center`}>
                         {loadingSeatIndex === seat.index ? <Loader2 className="w-5 h-5 text-brand-500 animate-spin" /> : seat.userId ? (
-                            <><img src={seat.userAvatar!} className="w-full h-full rounded-full object-cover" />{!seat.isMuted && isSpeaking && <div className="absolute inset-0 rounded-full border border-green-400 animate-ping opacity-40"></div>}{seat.isMuted && <div className="absolute inset-0 rounded-full bg-black/50 flex items-center justify-center"><MicOff className="w-3 h-3 text-red-500"/></div>}</>
+                            <>
+                                <img src={seat.userAvatar!} className="w-full h-full rounded-full object-cover relative z-10" />
+                                {/* Beautiful Sound Wave for Users */}
+                                {!seat.isMuted && isSpeaking && (
+                                    <>
+                                        <div className="absolute inset-0 rounded-full border-2 border-green-400 opacity-60 animate-[ping_1.5s_cubic-bezier(0,0,0.2,1)_infinite]"></div>
+                                        <div className="absolute inset-0 rounded-full border-2 border-green-300 opacity-40 animate-[ping_2s_cubic-bezier(0,0,0.2,1)_infinite]"></div>
+                                    </>
+                                )}
+                                {seat.isMuted && <div className="absolute inset-0 rounded-full bg-black/50 flex items-center justify-center z-20"><MicOff className="w-3 h-3 text-red-500"/></div>}
+                            </>
                         ) : (seat.isLocked ? <Lock className="w-3 h-3 text-red-400/70" /> : <span className="text-white/20 text-[9px] font-bold">{seat.index}</span>)}
                     </div>
                     <div className="mt-1 max-w-[50px] truncate text-[8px] text-white/90 bg-white/10 px-2 py-0.5 rounded-full">{seat.userId ? seat.userName : (seat.isLocked ? t('lock') : '')}</div>
@@ -792,6 +1181,7 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
                   const isMe = msg.userId === currentUser.id;
                   const isOfficial = msg.userId === 'OFFECAL' || (msg.userId === room.hostId && room.hostId === 'OFFECAL');
                   const isAi = msg.userId === 'AI_HOST';
+                  const isYellowMsg = msg.text.startsWith('🎉 تهانينا');
 
                   if (msg.isGift) {
                       return (
@@ -811,7 +1201,7 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
                   return (
                       <div key={msg.id} className={`flex items-start gap-2 ${isMe ? 'flex-row-reverse' : ''} animate-in slide-in-from-bottom-2`}>
                           <div className={`relative w-8 h-8 shrink-0 p-[2px] rounded-full ${isAi ? 'border-2 border-brand-400 shadow-lg' : getFrameClass(msg.frameId)}`}>
-                              <img src={msg.userAvatar} className="w-full h-full rounded-full object-cover" />
+                              {msg.userAvatar ? <img src={msg.userAvatar} className="w-full h-full rounded-full object-cover" /> : <div className="w-full h-full bg-gray-600 rounded-full"></div>}
                               {isOfficial && <div className="absolute -bottom-1 -right-1 bg-white rounded-full p-[1px]"><BadgeCheck className="w-3 h-3 text-blue-500 fill-blue-100" /></div>}
                               {isAi && <div className="absolute -bottom-1 -right-1 bg-black rounded-full p-[2px]"><Bot className="w-3 h-3 text-brand-400" /></div>}
                           </div>
@@ -828,7 +1218,7 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
 
                                    <span className={`text-[10px] font-bold flex items-center gap-1 ${getVipTextStyle(msg.vipLevel || 0)}`}>{msg.userName}{isOfficial && <BadgeCheck className="w-3 h-3 text-blue-500 fill-blue-100 inline" />}{isAi && <span className="text-[8px] bg-brand-600 text-white px-1 rounded">BOT</span>}</span>
                               </div>
-                              <div className={`px-3 py-1.5 text-xs leading-relaxed text-white shadow-sm break-words border border-white/5 backdrop-blur-md ${bubbleClass} ${isMe ? 'rounded-tr-none' : 'rounded-tl-none'}`}>{msg.text}</div>
+                              <div className={`px-3 py-1.5 text-xs leading-relaxed text-white shadow-sm break-words border border-white/5 backdrop-blur-md ${bubbleClass} ${isMe ? 'rounded-tr-none' : 'rounded-tl-none'} ${isYellowMsg ? 'text-yellow-300 font-bold border-yellow-500/50 bg-yellow-900/20' : ''}`}>{msg.text}</div>
                           </div>
                       </div>
                   );
@@ -862,12 +1252,17 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
 
       {showOptionsMenu && (
           <div className="absolute inset-0 z-[70] flex flex-col justify-end bg-black/60 backdrop-blur-sm animate-in slide-in-from-bottom-10" onClick={() => setShowOptionsMenu(false)}>
-              <div className="bg-gray-900 border-t border-gray-700 rounded-t-3xl p-5 shadow-2xl" onClick={e => e.stopPropagation()}>
+              <div className="bg-gray-900/30 backdrop-blur-3xl border-t border-white/20 rounded-t-3xl p-5 shadow-2xl" onClick={e => e.stopPropagation()}>
                   <div className="flex justify-between items-center mb-4">
                       <h3 className="text-white font-bold">{t('menu')}</h3>
                       <button onClick={() => setShowOptionsMenu(false)} className="text-gray-400 hover:text-white"><X className="w-5 h-5"/></button>
                   </div>
                   <div className="grid grid-cols-4 gap-4">
+                      <div onClick={() => { setShowOptionsMenu(false); setShowMusicMiniPlayer(true); }} className="flex flex-col items-center gap-2 cursor-pointer group">
+                          <div className="p-3 bg-pink-600/20 text-pink-400 rounded-2xl group-hover:bg-pink-600/30 transition"><Music className="w-6 h-6"/></div>
+                          <span className="text-xs text-gray-300 font-medium">{t('music')}</span>
+                      </div>
+
                       <div onClick={() => {}} className="flex flex-col items-center gap-2 cursor-pointer group">
                           <div className="p-3 bg-blue-600/20 text-blue-400 rounded-2xl group-hover:bg-blue-600/30 transition"><Share2 className="w-6 h-6"/></div>
                           <span className="text-xs text-gray-300 font-medium">{t('share')}</span>
@@ -899,53 +1294,208 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
           </div>
       )}
 
+      {showMusicMiniPlayer && (
+          <div className="absolute inset-0 z-[80] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4 animate-in fade-in">
+              <div className="w-80 bg-gray-900/30 backdrop-blur-2xl border border-white/20 rounded-[2rem] p-6 shadow-2xl flex flex-col items-center relative overflow-hidden ring-1 ring-white/10">
+                  <button onClick={() => setShowMusicMiniPlayer(false)} className="absolute top-4 right-4 text-gray-400 hover:text-white z-20">
+                      <X className="w-6 h-6"/>
+                  </button>
+                  <h2 className="text-xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-brand-400 to-gold-400 mb-6 tracking-wide">
+                      {t('music')}
+                  </h2>
+                  <div className="relative w-48 h-48 mb-6 flex items-center justify-center">
+                      <div className={`absolute inset-0 rounded-full bg-gray-900/80 border-4 border-gray-700/50 shadow-xl flex items-center justify-center overflow-hidden ${isMusicPlaying ? 'animate-spin-slow' : ''}`}>
+                          <div className="absolute inset-2 rounded-full border border-gray-700/30"></div>
+                          <div className="absolute inset-6 rounded-full border border-gray-700/30"></div>
+                          <div className="absolute inset-10 rounded-full border border-gray-700/30"></div>
+                          <div className="w-16 h-16 rounded-full bg-gradient-to-tr from-brand-600/80 to-purple-800/80 flex items-center justify-center shadow-inner relative z-10 border-2 border-gray-800/50">
+                              <Hexagon className="w-8 h-8 text-white fill-white/20" strokeWidth={1.5} />
+                          </div>
+                      </div>
+                  </div>
+                  <div className="w-full text-center mb-4">
+                      <h3 className="text-white font-bold text-sm truncate px-2 drop-shadow-md">
+                          {currentSong ? currentSong.name : t('chooseMusic')}
+                      </h3>
+                      <p className="text-brand-300 text-[10px] font-mono mt-1">
+                          {formatTime(musicProgress)} / {formatTime(musicDuration)}
+                      </p>
+                  </div>
+                  <input type="range" min="0" max={musicDuration || 100} value={musicProgress} onChange={handleMusicSeek} className="w-full h-1 bg-white/20 rounded-full appearance-none cursor-pointer mb-6 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-gold-500 [&::-webkit-slider-thumb]:rounded-full"/>
+                  <div className="flex items-center justify-center gap-6 mb-6 w-full relative">
+                      <button className="text-gray-300 hover:text-white transition transform active:scale-95"><SkipBack className="w-6 h-6 fill-current"/></button>
+                      <button onClick={toggleMusicPlay} className="w-12 h-12 bg-gradient-to-br from-brand-500 to-purple-600 rounded-full text-white flex items-center justify-center shadow-lg shadow-brand-500/30 hover:scale-105 transition transform active:scale-95 border border-white/10" disabled={!currentSong}>{isMusicPlaying ? <Pause className="w-6 h-6 fill-current"/> : <Play className="w-6 h-6 fill-current ml-1"/>}</button>
+                      <button className="text-gray-300 hover:text-white transition transform active:scale-95"><SkipForward className="w-6 h-6 fill-current"/></button>
+                  </div>
+                  <button onClick={() => setShowMusicPlaylist(true)} className="absolute bottom-4 left-4 p-2 bg-white/10 hover:bg-white/20 rounded-full text-white transition border border-white/5" title={t('playlist')}><ListMusic className="w-5 h-5" /></button>
+                  <div className="absolute bottom-4 right-4 w-20 flex items-center gap-1">
+                      <Volume2 className="w-4 h-4 text-gray-300"/>
+                      <input type="range" min="0" max="100" value={musicVolume} onChange={handleMusicVolumeChange} className="flex-1 h-1 bg-white/30 rounded-full appearance-none cursor-pointer"/>
+                  </div>
+              </div>
+          </div>
+      )}
+
+      {showImportView && (
+          <div className="absolute inset-0 z-[100] bg-gray-900/30 backdrop-blur-3xl flex flex-col animate-in slide-in-from-bottom-20">
+              <div className="p-4 bg-gray-800/50 backdrop-blur border-b border-white/10 flex items-center gap-3">
+                  <button onClick={() => { setShowImportView(false); setStagedFiles([]); }} className="p-2 rounded-full hover:bg-white/10 text-white">
+                      <ArrowLeft className="w-6 h-6 rtl:rotate-180" />
+                  </button>
+                  <h1 className="text-lg font-bold text-white flex items-center gap-2">
+                      <Upload className="w-5 h-5 text-brand-400"/> {t('importTitle')}
+                  </h1>
+              </div>
+              <div className="flex-1 p-4 overflow-y-auto">
+                  {stagedFiles.length === 0 ? (
+                      <div className="h-full flex flex-col items-center justify-center space-y-6">
+                          <div className="p-6 bg-white/5 rounded-full border-2 border-dashed border-white/20">
+                              <Music className="w-12 h-12 text-gray-500" />
+                          </div>
+                          <div className="text-center">
+                              <h3 className="text-white font-bold text-lg mb-2">{t('selectFiles')}</h3>
+                              <p className="text-gray-400 text-sm max-w-xs">{t('importDesc')}</p>
+                          </div>
+                          <label className="bg-brand-600 hover:bg-brand-500 text-white px-8 py-3 rounded-full font-bold shadow-lg shadow-brand-500/20 cursor-pointer transition transform active:scale-95 flex items-center gap-2">
+                              <input type="file" accept="audio/*" multiple className="hidden" onChange={handleInitialFileSelect}/>
+                              <Plus className="w-5 h-5" /> {t('selectFiles')}
+                          </label>
+                      </div>
+                  ) : (
+                      <div className="flex flex-col h-full">
+                          <div className="relative mb-4">
+                              <Search className="absolute top-3 left-4 text-gray-500 w-4 h-4 rtl:right-4 rtl:left-auto" />
+                              <input type="text" placeholder={t('searchMusic')} value={importSearch} onChange={(e) => setImportSearch(e.target.value)} className="w-full bg-black/30 border border-white/10 rounded-xl py-2.5 px-10 text-white text-sm focus:border-brand-500 outline-none"/>
+                          </div>
+                          <div className="flex justify-between items-center mb-2 px-1">
+                              <span className="text-xs text-gray-400 font-medium">{stagedFiles.length} songs found</span>
+                              <button onClick={selectAllStaged} className="text-brand-400 text-xs font-bold hover:text-brand-300">{t('selectAll')}</button>
+                          </div>
+                          <div className="space-y-2 pb-20">
+                              {filteredStagedFiles.map((file) => (
+                                  <div key={file.id} onClick={() => toggleStagedFile(file.id)} className={`flex items-center gap-3 p-3 rounded-xl border cursor-pointer transition ${file.selected ? 'bg-brand-900/30 border-brand-500/50' : 'bg-white/5 border-transparent hover:bg-white/10'}`}>
+                                      <div className={`w-10 h-10 rounded-lg flex items-center justify-center shrink-0 ${file.selected ? 'bg-brand-500 text-white' : 'bg-gray-800 text-gray-500'}`}><Music className="w-5 h-5" /></div>
+                                      <div className="flex-1 min-w-0">
+                                          <div className={`text-sm font-bold truncate ${file.selected ? 'text-brand-200' : 'text-white'}`}>{file.name}</div>
+                                          <div className="text-[10px] text-gray-500">Local File</div>
+                                      </div>
+                                      <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${file.selected ? 'border-brand-500 bg-brand-500' : 'border-gray-500'}`}>{file.selected && <Check className="w-3 h-3 text-white" />}</div>
+                                  </div>
+                              ))}
+                          </div>
+                      </div>
+                  )}
+              </div>
+              {stagedFiles.length > 0 && (
+                  <div className="p-4 bg-gray-900/90 backdrop-blur border-t border-white/10 absolute bottom-0 left-0 right-0 z-10">
+                      <button onClick={confirmImport} className="w-full py-3 bg-gradient-to-r from-brand-600 to-purple-600 text-white rounded-xl font-bold shadow-lg flex items-center justify-center gap-2 hover:opacity-90 active:scale-95 transition">
+                          <CheckCircle2 className="w-5 h-5" /> {t('confirmImport')} ({stagedFiles.filter(f => f.selected).length})
+                      </button>
+                  </div>
+              )}
+          </div>
+      )}
+
+      {showMusicPlaylist && (
+          <div className="absolute inset-0 z-[90] bg-gray-900 flex flex-col animate-in slide-in-from-right font-sans">
+              <div className="p-4 bg-gray-800/80 backdrop-blur shadow-md flex items-center gap-3 border-b border-white/5">
+                  <button onClick={() => setShowMusicPlaylist(false)} className="p-2 rounded-full hover:bg-white/10 text-white">
+                      <ArrowLeft className="w-6 h-6 rtl:rotate-180" />
+                  </button>
+                  <h1 className="text-lg font-bold text-white flex items-center gap-2">
+                      <ListMusic className="w-5 h-5 text-brand-400"/> {t('playlist')}
+                  </h1>
+              </div>
+              <div className="flex-1 overflow-y-auto p-4 space-y-2">
+                  {playlist.length === 0 ? (
+                      <div className="flex flex-col items-center justify-center mt-20 opacity-50">
+                          <Music className="w-16 h-16 text-gray-600 mb-4"/>
+                          <p className="text-gray-400 text-sm">{t('noMusic') || "No music added yet"}</p>
+                      </div>
+                  ) : (
+                      playlist.map((song) => (
+                          <div key={song.id} className={`flex items-center justify-between p-3 rounded-xl border transition ${currentSong?.id === song.id ? 'bg-brand-900/30 border-brand-500/50' : 'bg-gray-800/50 border-gray-700 hover:border-gray-500'}`}>
+                              <div className="flex items-center gap-3 overflow-hidden cursor-pointer flex-1" onClick={() => { playSong(song); setShowMusicPlaylist(false); }}>
+                                  <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${currentSong?.id === song.id ? 'bg-brand-500 text-white' : 'bg-gray-700 text-gray-400'}`}><Music className="w-5 h-5" /></div>
+                                  <div className="flex flex-col min-w-0">
+                                      <span className={`text-sm font-bold truncate ${currentSong?.id === song.id ? 'text-brand-300' : 'text-white'}`}>{song.name}</span>
+                                      <span className="text-[10px] text-gray-500">{t('localMusic')}</span>
+                                  </div>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                {currentSong?.id === song.id && isMusicPlaying && (
+                                    <div className="flex gap-0.5 items-end h-4 mr-2">
+                                        <div className="w-1 bg-brand-400 animate-[music-wave_0.6s_ease-in-out_infinite] h-2"></div>
+                                        <div className="w-1 bg-brand-400 animate-[music-wave_0.8s_ease-in-out_infinite] h-4"></div>
+                                        <div className="w-1 bg-brand-400 animate-[music-wave_1.0s_ease-in-out_infinite] h-3"></div>
+                                    </div>
+                                )}
+                                <button onClick={(e) => handleDeleteSong(song.id, e)} className="p-2 text-red-400 hover:text-red-300 rounded-full hover:bg-red-900/20"><Trash2 className="w-4 h-4" /></button>
+                              </div>
+                          </div>
+                      ))
+                  )}
+              </div>
+              <div className="p-4 bg-gray-900 border-t border-white/5 pb-8">
+                  <button onClick={() => { setShowMusicPlaylist(false); setShowImportView(true); }} className="w-full py-4 rounded-2xl bg-white/5 hover:bg-white/10 border border-white/10 backdrop-blur-md flex items-center justify-center gap-2 cursor-pointer transition active:scale-95 group">
+                      <div className="p-2 bg-brand-600 rounded-full group-hover:bg-brand-500 transition shadow-lg shadow-brand-500/20"><Plus className="w-6 h-6 text-white"/></div>
+                      <span className="text-white font-bold text-sm tracking-wide">{t('addMusic')}</span>
+                  </button>
+              </div>
+          </div>
+      )}
+
       {showGiftPanel && (
           <div className="absolute inset-0 z-50 flex flex-col justify-end bg-black/50 backdrop-blur-sm animate-in slide-in-from-bottom-10">
-              <div className="bg-gray-900 border-t border-gray-700 rounded-t-3xl p-4 shadow-2xl h-[50vh] flex flex-col">
+              <div className="bg-gray-900/30 backdrop-blur-3xl border-t border-white/20 rounded-t-3xl p-4 shadow-2xl h-[60vh] flex flex-col">
+                  <div className="flex gap-4 overflow-x-auto p-2 mb-2 border-b border-white/5 no-scrollbar min-h-[60px] items-center flex-row">
+                        <div onClick={() => toggleGiftTarget('all')} className={`flex flex-col items-center gap-1 cursor-pointer shrink-0 transition-transform active:scale-95 ${giftTargets.includes('all') ? 'opacity-100 scale-105' : 'opacity-60'}`}>
+                            <div className={`w-10 h-10 rounded-full flex items-center justify-center border-2 ${giftTargets.includes('all') ? 'border-brand-500 bg-brand-500/20 text-white' : 'border-gray-600 bg-gray-800 text-gray-400'}`}><Users className="w-5 h-5" /></div>
+                            <span className={`text-[9px] font-bold ${giftTargets.includes('all') ? 'text-brand-400' : 'text-gray-400'}`}>{t('all')}</span>
+                        </div>
+                        {activeSeats.map(seat => (
+                            <div key={seat.index} onClick={() => toggleGiftTarget(seat.userId!)} className={`flex flex-col items-center gap-1 cursor-pointer shrink-0 transition-transform active:scale-95 relative ${giftTargets.includes(seat.userId!) ? 'opacity-100 scale-105' : 'opacity-60'}`}>
+                                <div className={`w-10 h-10 rounded-full p-[2px] relative ${giftTargets.includes(seat.userId!) ? 'border-2 border-brand-500' : 'border border-gray-600'}`}>
+                                    <img src={seat.userAvatar!} className="w-full h-full rounded-full object-cover" />
+                                    <div className="absolute -bottom-1 -right-1 w-4 h-4 bg-black/80 rounded-full flex items-center justify-center text-[8px] text-white border border-gray-600 font-bold">{seat.index}</div>
+                                    {giftTargets.includes(seat.userId!) && (<div className="absolute inset-0 bg-brand-500/30 rounded-full flex items-center justify-center"><Check className="w-5 h-5 text-white drop-shadow-md"/></div>)}
+                                </div>
+                                <span className={`text-[9px] max-w-[60px] truncate ${giftTargets.includes(seat.userId!) ? 'text-brand-400 font-bold' : 'text-gray-400'}`}>{seat.userName}</span>
+                            </div>
+                        ))}
+                  </div>
                   <div className="flex justify-between items-center mb-2">
                       <div className="flex gap-2">
-                          <button onClick={() => setGiftTab('static')} className={`px-4 py-1.5 rounded-full text-xs font-bold transition ${giftTab === 'static' ? 'bg-white text-black' : 'bg-gray-800 text-gray-400'}`}>{t('static')}</button>
-                          <button onClick={() => setGiftTab('animated')} className={`px-4 py-1.5 rounded-full text-xs font-bold transition ${giftTab === 'animated' ? 'bg-gradient-to-r from-purple-500 to-pink-500 text-white shadow-lg' : 'bg-gray-800 text-gray-400'}`}>{t('animated')}</button>
+                          <button onClick={() => setGiftTab('static')} className={`px-4 py-1.5 rounded-full text-xs font-bold transition ${giftTab === 'static' ? 'bg-white text-black' : 'bg-gray-800/50 text-gray-400'}`}>{t('static')}</button>
+                          <button onClick={() => setGiftTab('animated')} className={`px-4 py-1.5 rounded-full text-xs font-bold transition ${giftTab === 'animated' ? 'bg-gradient-to-r from-purple-500 to-pink-500 text-white shadow-lg' : 'bg-gray-800/50 text-gray-400'}`}>{t('animated')}</button>
                       </div>
-                      <div className="flex items-center gap-1 bg-gray-800 px-3 py-1 rounded-full border border-gray-700"><span className="text-xs text-yellow-500">💎</span><span className="text-xs font-bold text-white">{currentUser.wallet?.diamonds || 0}</span></div>
                       <button onClick={() => setShowGiftPanel(false)}><X className="w-5 h-5 text-gray-500" /></button>
                   </div>
-
-                  <div className="flex-1 overflow-y-auto grid grid-cols-4 gap-3 pb-2 content-start">
+                  <div className="flex-1 overflow-y-auto grid grid-cols-4 gap-3 pb-2 content-start custom-scrollbar">
                       {filteredGifts.map(gift => (
-                          <button 
-                            key={gift.id} 
-                            onClick={() => setSelectedGift(gift)} 
-                            disabled={isSendingGift}
-                            className={`flex flex-col items-center p-2 rounded-xl border transition relative group ${
-                                selectedGift?.id === gift.id 
-                                    ? 'border-brand-500 bg-brand-500/10' 
-                                    : 'border-transparent hover:bg-white/5'
-                            } ${isSendingGift ? 'opacity-50 cursor-not-allowed' : ''}`}
-                          >
+                          <button key={gift.id} onClick={() => setSelectedGift(gift)} disabled={isSendingGift} className={`flex flex-col items-center p-2 rounded-xl border transition relative group ${selectedGift?.id === gift.id ? 'border-brand-500 bg-brand-500/10' : 'border-transparent hover:bg-white/5'} ${isSendingGift ? 'opacity-50 cursor-not-allowed' : ''}`}>
                               <span className={`text-4xl mb-1 filter drop-shadow-md transition ${selectedGift?.id === gift.id ? 'scale-110' : 'group-hover:scale-105'}`}>{gift.icon}</span>
                               <span className="text-[10px] text-gray-300 font-medium truncate w-full text-center">{gift.name}</span>
                               <div className="flex items-center gap-0.5 mt-1 bg-black/30 px-1.5 py-0.5 rounded text-[9px]"><span className="text-yellow-500">💎</span><span className="text-yellow-100 font-bold">{gift.cost}</span></div>
                           </button>
                       ))}
                   </div>
-
-                  <div className="pt-3 border-t border-white/5 flex gap-3 items-center">
-                      <div className="flex items-center gap-2 bg-black/40 rounded-full px-3 py-2 border border-white/10 flex-1">
-                          <span className="text-gray-400 text-xs whitespace-nowrap">{t('sendTo')}</span>
-                          <select value={giftTarget} onChange={(e) => setGiftTarget(e.target.value)} className="bg-transparent text-white text-xs outline-none w-full">
-                              <option value="all" className="bg-gray-900">{t('everyone')}</option>
-                              <option value="me" className="bg-gray-900">{t('me')}</option>
-                              {seats.filter(s => s.userId).map(s => (<option key={s.index} value={s.userId!} className="bg-gray-900">{s.userName}</option>))}
-                          </select>
+                  <div className="pt-3 border-t border-white/5 flex gap-2 items-center">
+                      <div className="flex items-center gap-2 bg-black/40 rounded-full px-3 py-2 border border-white/10 flex-1 min-w-0 relative group">
+                          <span className="text-gray-400 text-xs whitespace-nowrap">{t('multiplier')}:</span>
+                          <div className="relative flex-1">
+                              <select value={giftMultiplier} onChange={(e) => setGiftMultiplier(Number(e.target.value))} className="appearance-none bg-transparent text-white text-xs font-bold w-full outline-none text-center cursor-pointer">
+                                  {[1, 7, 17, 77, 777].map(num => (<option key={num} value={num} className="bg-gray-900 text-white">x{num}</option>))}
+                              </select>
+                              <div className="absolute right-0 top-1/2 -translate-y-1/2 pointer-events-none"><ArrowDownCircle className="w-3 h-3 text-brand-400"/></div>
+                          </div>
                       </div>
-                      <button 
-                        onClick={executeSendGift}
-                        disabled={isSendingGift || !selectedGift}
-                        className="bg-gradient-to-r from-brand-600 to-accent-600 text-white font-bold py-2 px-8 rounded-full shadow-lg hover:shadow-brand-500/20 disabled:opacity-50 disabled:cursor-not-allowed transition transform active:scale-95 flex items-center gap-2"
-                      >
-                          {isSendingGift ? <Loader2 className="w-4 h-4 animate-spin"/> : <Send className="w-4 h-4 rtl:rotate-180"/>}
-                          {t('send')}
+                      <div className="flex items-center gap-1 bg-black/40 px-3 py-2 rounded-full border border-white/10 shrink-0">
+                          <span className="text-xs text-yellow-500">💎</span>
+                          <span className="text-xs font-bold text-white">{currentUser.wallet?.diamonds || 0}</span>
+                      </div>
+                      <button onClick={executeSendGift} disabled={isSendingGift || !selectedGift} className="bg-gradient-to-r from-brand-600 to-accent-600 text-white font-bold py-2 px-6 rounded-full shadow-lg hover:shadow-brand-500/20 disabled:opacity-50 disabled:cursor-not-allowed transition transform active:scale-95 flex items-center gap-2 shrink-0">
+                          {isSendingGift ? <Loader2 className="w-4 h-4 animate-spin"/> : <Send className="w-4 h-4 rtl:rotate-180"/>} {t('send')}
                       </button>
                   </div>
               </div>
@@ -975,13 +1525,13 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
                       }
                   }}
                   onGift={() => {
-                      setGiftTarget(selectedUser.userId || 'all');
+                      setGiftTargets([selectedUser.userId || 'all']);
                       setSelectedUser(null);
                       setShowGiftPanel(true);
                   }}
                   onKickSeat={canBanTarget && selectedUser.userId ? () => handleKickSeat(selectedUser.index) : undefined}
                   onBanUser={canBanTarget && selectedUser.userId ? () => handleBanRequest(selectedUser.userId!) : undefined}
-                  onMakeAdmin={isHost && !isTargetAdmin && !isTargetMe ? () => handleMakeAdmin(targetUid) : undefined}
+                  onMakeAdmin={isHost && !isTargetAdmin && !isTargetMe ? () => handleMakeAdmin(targetUid, selectedUser.userName!) : undefined}
                   onRemoveAdmin={isHost && isTargetAdmin && !isTargetMe ? () => handleRemoveAdmin(targetUid) : undefined}
                   onLeaveSeat={(isTargetMe && mySeat) ? () => { handleLeaveSeat(); setSelectedUser(null); } : undefined}
                   onOpenFullProfile={(user) => {
@@ -992,7 +1542,6 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
           );
       })()}
 
-      {/* BAN DURATION MODAL */}
       {showBanDurationModal && (
           <div className="absolute inset-0 z-[70] flex items-center justify-center bg-black/90 backdrop-blur-sm p-4 animate-in zoom-in-95">
               <div className="bg-gray-900 border border-red-500 rounded-2xl w-full max-w-xs p-5 shadow-2xl">
@@ -1044,7 +1593,7 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
                                   <div className="flex-1">
                                       <div className="flex items-center gap-1">
                                           <span className="text-sm text-white font-bold">{viewer.name}</span>
-                                          {viewer.id === 'OFFECAL' && <BadgeCheck className="w-3 h-3 text-blue-500 fill-white" />}
+                                          {viewer.id === 'OFFECAL' && <BadgeCheck className="w-3 h-3 text-blue-500 fill-blue-100" />}
                                       </div>
                                       <span className="text-[10px] text-gray-500">ID: {viewer.id}</span>
                                   </div>
@@ -1083,6 +1632,20 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
                                   <div className="flex items-center gap-2"><div className="p-2 bg-brand-500/20 rounded-lg text-brand-400"><Bot className="w-5 h-5"/></div><div><h4 className="text-sm font-bold text-white">{t('aiHost')}</h4><p className="text-[10px] text-gray-400">{t('aiHostDesc')}</p></div></div>
                                   <button onClick={() => setIsAiEnabled(!isAiEnabled)} className={`w-10 h-6 rounded-full p-1 transition ${isAiEnabled ? 'bg-brand-600' : 'bg-gray-700'}`}><div className={`w-4 h-4 bg-white rounded-full transition-transform ${isAiEnabled ? 'translate-x-4' : 'translate-x-0'}`}></div></button>
                               </div>
+                              
+                              <div onClick={toggleRoomLock} className={`flex items-center justify-between p-3 rounded-xl border cursor-pointer transition ${room.isLocked ? 'bg-red-500/10 border-red-500/30' : 'bg-white/5 border-white/10 hover:bg-white/10'}`}>
+                                  <div className="flex items-center gap-2">
+                                      <div className={`p-2 rounded-lg ${room.isLocked ? 'bg-red-500/20 text-red-400' : 'bg-gray-700 text-gray-400'}`}>
+                                          {room.isLocked ? <Lock className="w-5 h-5"/> : <Unlock className="w-5 h-5"/>}
+                                      </div>
+                                      <div>
+                                          <h4 className={`text-sm font-bold ${room.isLocked ? 'text-red-400' : 'text-white'}`}>{room.isLocked ? t('unlockRoom') : t('lockRoom')}</h4>
+                                          <p className="text-[10px] text-gray-400">{room.isLocked ? 'Room is currently locked' : 'Set a password for entry'}</p>
+                                      </div>
+                                  </div>
+                                  <div className={`w-4 h-4 rounded-full border-2 ${room.isLocked ? 'bg-red-500 border-red-500' : 'border-gray-500'}`}></div>
+                              </div>
+
                               <div><label className="text-xs text-gray-400 mb-1 block">{t('roomTitle')}</label><input type="text" value={editTitle} onChange={(e) => setEditTitle(e.target.value)} className="w-full bg-black/40 border border-gray-700 rounded-xl p-3 text-white text-sm focus:border-brand-500 outline-none"/></div>
                               <div><label className="text-xs text-gray-400 mb-1 block">{t('roomDesc')}</label><textarea rows={3} value={editDesc} onChange={(e) => setEditDesc(e.target.value)} className="w-full bg-black/40 border border-gray-700 rounded-xl p-3 text-white text-sm focus:border-brand-500 outline-none resize-none" placeholder="Set rules..."></textarea></div>
                           </div>
@@ -1101,18 +1664,16 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
                       )}
                       {settingsTab === 'banned' && isHost && (
                           <div className="space-y-2">
-                              {!room.bannedUsers || Object.keys(room.bannedUsers).length === 0 ? <div className="text-gray-500 text-center text-xs py-10">No banned users</div> : Object.entries(room.bannedUsers).map(([uid, expiry]) => (
-                                  <div key={uid} className="flex justify-between items-center bg-gray-800 p-2 rounded-lg border border-gray-700">
+                              {loadingProfiles ? <div className="text-center text-gray-500"><Loader2 className="w-6 h-6 animate-spin mx-auto"/></div> : bannedProfiles.length === 0 ? <div className="text-gray-500 text-center text-xs py-10">No banned users</div> : bannedProfiles.map((user) => (
+                                  <div key={user.uid} className="flex justify-between items-center bg-gray-800 p-2 rounded-lg border border-gray-700">
                                       <div className="flex items-center gap-2">
-                                          <Ban className="w-4 h-4 text-red-500" />
+                                          <img src={user.avatar} className="w-8 h-8 rounded-full object-cover border border-gray-600" />
                                           <div className="flex flex-col">
-                                              <span className="text-white text-xs font-mono">{uid}</span>
-                                              <span className="text-[9px] text-gray-400">
-                                                  {expiry === -1 ? t('permanent') : new Date(expiry as number).toLocaleString()}
-                                              </span>
+                                              <span className="text-white text-xs font-bold">{user.name}</span>
+                                              <span className="text-[9px] text-gray-400 font-mono">{user.id}</span>
                                           </div>
                                       </div>
-                                      <button onClick={() => handleUnbanUser(uid)} className="text-[10px] bg-green-600/20 text-green-400 px-2 py-1 rounded border border-green-600/50">{t('unban')}</button>
+                                      <button onClick={() => handleUnbanUser(user.uid!)} className="text-[10px] bg-green-600/20 text-green-400 px-3 py-1.5 rounded border border-green-600/50 font-bold">{t('unban')}</button>
                                   </div>
                               ))}
                           </div>
@@ -1120,7 +1681,18 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
                       {settingsTab === 'admins' && isHost && (
                           <div className="space-y-2">
                               <h4 className="text-xs text-gray-400 font-bold mb-2 uppercase">{t('adminList')}</h4>
-                              {!room.admins || room.admins.length === 0 ? <div className="text-gray-500 text-center text-xs py-10">No admins appointed</div> : room.admins.map(uid => (<div key={uid} className="flex justify-between items-center bg-gray-800 p-2 rounded-lg border border-blue-900/50"><div className="flex items-center gap-2"><Shield className="w-4 h-4 text-blue-500" /><span className="text-white text-xs font-mono">{uid}</span></div><button onClick={() => handleRemoveAdmin(uid)} className="text-[10px] bg-red-600/20 text-red-400 px-2 py-1 rounded border border-red-600/50">{t('remove')}</button></div>))}
+                              {loadingProfiles ? <div className="text-center text-gray-500"><Loader2 className="w-6 h-6 animate-spin mx-auto"/></div> : adminProfiles.length === 0 ? <div className="text-gray-500 text-center text-xs py-10">No admins appointed</div> : adminProfiles.map(user => (
+                                  <div key={user.uid} className="flex justify-between items-center bg-gray-800 p-2 rounded-lg border border-blue-900/50">
+                                      <div className="flex items-center gap-2">
+                                          <img src={user.avatar} className="w-8 h-8 rounded-full object-cover border border-blue-500" />
+                                          <div className="flex flex-col">
+                                              <span className="text-white text-xs font-bold">{user.name}</span>
+                                              <span className="text-[9px] text-gray-400 font-mono">{user.id}</span>
+                                          </div>
+                                      </div>
+                                      <button onClick={() => handleRemoveAdmin(user.uid!)} className="text-[10px] bg-red-600/20 text-red-400 px-3 py-1.5 rounded border border-red-600/50 font-bold">{t('remove')}</button>
+                                  </div>
+                              ))}
                           </div>
                       )}
                   </div>
@@ -1159,6 +1731,28 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
                   <div className="flex gap-3">
                       <button onClick={() => setSeatToConfirm(null)} className="flex-1 py-3 rounded-xl bg-gray-800 text-gray-400 font-bold hover:bg-gray-700">{t('cancel')}</button>
                       <button onClick={confirmTakeSeat} className="flex-1 py-3 rounded-xl bg-brand-600 text-white font-bold hover:bg-brand-500">{t('yes')}</button>
+                  </div>
+              </div>
+          </div>
+      )}
+
+      {showLockSetupModal && (
+          <div className="absolute inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in">
+              <div className="bg-gray-900 border border-gray-700 rounded-3xl w-full max-w-xs shadow-2xl p-6 relative text-center">
+                  <h3 className="text-white font-bold text-lg mb-4 flex items-center justify-center gap-2">
+                      <KeyRound className="w-5 h-5 text-brand-400"/>
+                      {t('setPassword')}
+                  </h3>
+                  <input 
+                      type="number" 
+                      placeholder={t('passPlaceholder')}
+                      value={newRoomPassword}
+                      onChange={(e) => { if(e.target.value.length <= 6) setNewRoomPassword(e.target.value); }}
+                      className="w-full bg-black/50 border border-gray-600 rounded-xl py-3 px-4 text-center text-white tracking-widest text-lg focus:border-brand-500 outline-none mb-4"
+                  />
+                  <div className="flex gap-2">
+                      <button onClick={() => setShowLockSetupModal(false)} className="flex-1 py-2 rounded-xl bg-gray-800 text-gray-400">{t('cancel')}</button>
+                      <button onClick={confirmLock} className="flex-1 py-2 rounded-xl bg-brand-600 text-white font-bold">{t('confirm')}</button>
                   </div>
               </div>
           </div>

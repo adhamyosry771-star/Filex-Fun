@@ -77,6 +77,9 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
 
   const [seatToConfirm, setSeatToConfirm] = useState<number | null>(null);
   const [loadingSeatIndex, setLoadingSeatIndex] = useState<number | null>(null);
+  // Ref to track loading seat index inside closures (listeners)
+  const loadingSeatRef = useRef<number | null>(null);
+
   const [floatingHearts, setFloatingHearts] = useState<{id: number, left: number}[]>([]);
   
   const [editTitle, setEditTitle] = useState(room.title);
@@ -111,9 +114,6 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
   
   const joinTimestamp = useRef(Date.now());
   const hasSentJoinMsg = useRef(false);
-
-  const pendingKickSeats = useRef<Set<number>>(new Set());
-  const pendingBannedUsers = useRef<Set<string>>(new Set());
 
   const currentUserRef = useRef(currentUser);
   useEffect(() => { currentUserRef.current = currentUser; }, [currentUser]);
@@ -297,34 +297,31 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
       sendJoin();
   }, [room.id, currentUser.uid]);
 
+  // --- STRICT SERVER SYNC LISTENER ---
   useEffect(() => {
       const unsubscribe = listenToRoom(initialRoom.id, (updatedRoom) => {
           if (updatedRoom) {
-              setRoom(prevRoom => {
-                  // Only update seats if they fundamentally changed from server to avoid stutter
-                  // But accept Optimistic updates usually
-                  const existingSeats = updatedRoom.seats || [];
-                  const adjustedSeats = Array(11).fill(null).map((_, i) => existingSeats[i] || { 
-                      index: i, 
-                      userId: null, 
-                      giftCount: 0,
-                      isMuted: false, 
-                      isLocked: false 
-                  });
+              // Ensure we don't clear loading state until the server confirms the change
+              // or confirms it failed (by showing another user or empty when we expected us)
+              if (loadingSeatRef.current !== null) {
+                  const targetIdx = loadingSeatRef.current;
+                  const targetSeat = updatedRoom.seats[targetIdx];
+                  
+                  // Case 1: Success - Server says we are in the seat
+                  if (targetSeat && targetSeat.userId === currentUser.id) {
+                      setLoadingSeatIndex(null);
+                      loadingSeatRef.current = null;
+                  }
+                  // Case 2: Failure - Server says someone else is in the seat (Race condition lost)
+                  else if (targetSeat && targetSeat.userId && targetSeat.userId !== currentUser.id) {
+                      setLoadingSeatIndex(null);
+                      loadingSeatRef.current = null;
+                  }
+                  // Case 3: Still waiting - Seat is empty or same as before, keep spinning...
+              }
 
-                  const newSeats = adjustedSeats.map(serverSeat => {
-                      if (pendingKickSeats.current.has(serverSeat.index)) {
-                          if (!serverSeat.userId) {
-                              pendingKickSeats.current.delete(serverSeat.index);
-                              return serverSeat;
-                          }
-                          return { ...serverSeat, userId: null, userName: null, userAvatar: null, giftCount: 0, adminRole: null, isMuted: false, frameId: null };
-                      }
-                      return serverSeat;
-                  });
-
-                  return { ...updatedRoom, seats: newSeats };
-              });
+              // Update Room State strictly from Server
+              setRoom(updatedRoom);
 
               if (!showRoomSettings) {
                   setEditTitle(updatedRoom.title);
@@ -347,7 +344,16 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
           }
       });
       return () => unsubscribe();
-  }, [initialRoom.id, onAction, showRoomSettings, currentUser.uid]);
+  }, [initialRoom.id, onAction, showRoomSettings, currentUser.uid, currentUser.id]);
+
+  // Safety fallback for loading state
+  useEffect(() => {
+      const myCurrentSeat = room.seats.find(s => s.userId === currentUser.id);
+      if (myCurrentSeat && loadingSeatRef.current === myCurrentSeat.index) {
+          setLoadingSeatIndex(null);
+          loadingSeatRef.current = null;
+      }
+  }, [room.seats, currentUser.id]);
 
   const mySeatIndex = mySeat?.index;
   const mySeatMuted = mySeat?.isMuted;
@@ -358,9 +364,8 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
           publishMicrophone(!!mySeatMuted).catch(err => {
               console.warn("Mic publish info:", err);
           });
-          // Clear loading immediately once seated logic is detected
-          if (loadingSeatIndex === mySeatIndex) setLoadingSeatIndex(null);
       } else {
+          // Only unpublish if we are definitely not seated and not loading a seat
           if (loadingSeatIndex === null) {
               unpublishMicrophone().catch(err => console.warn("Mic unpublish info:", err));
           }
@@ -792,39 +797,28 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
       if (seatToConfirm === null) return;
       const index = seatToConfirm;
       setSeatToConfirm(null); 
-      setLoadingSeatIndex(index); 
+      setLoadingSeatIndex(index);
+      loadingSeatRef.current = index; // Set Ref for listener to check
       
-      // OPTIMISTIC UI: Update seat locally immediately
-      setRoom(prev => {
-          const newSeats = [...prev.seats];
-          // Remove user from any other seat if they are moving
-          const oldSeatIdx = newSeats.findIndex(s => s.userId === currentUser.id);
-          if (oldSeatIdx !== -1) {
-              newSeats[oldSeatIdx] = { ...newSeats[oldSeatIdx], userId: null, userName: null, userAvatar: null, frameId: null };
-          }
-          // Put user on new seat
-          newSeats[index] = {
-              ...newSeats[index],
-              userId: currentUser.id,
-              userName: currentUser.name,
-              userAvatar: currentUser.avatar,
-              frameId: currentUser.equippedFrame || null, // Ensure frame shows immediately
-              isMuted: false,
-              isLocked: newSeats[index].isLocked,
-              giftCount: 0
-          };
-          return { ...prev, seats: newSeats };
-      });
-
-      // Immediately trigger mic state locally for responsiveness
-      publishMicrophone(false).catch(err => console.warn(err));
+      // Removed optimistic setRoom update to prevent bouncing.
+      // We now strictly wait for the server confirmation via onSnapshot.
 
       try { 
-          await takeSeat(room.id, index, currentUser); 
+          await takeSeat(room.id, index, currentUser);
+          
+          // Safety Timeout: If server doesn't respond in 5s, reset loading
+          setTimeout(() => {
+              if (loadingSeatRef.current === index) {
+                  setLoadingSeatIndex(null);
+                  loadingSeatRef.current = null;
+              }
+          }, 5000);
+
       } catch (e) { 
-          // Revert if failed (Basic revert, full sync happens via onSnapshot anyway)
           console.error("Take seat failed", e);
+          alert(language === 'ar' ? "فشل صعود المايك (قد يكون مأخوذ)" : "Failed to take seat (might be taken)");
           setLoadingSeatIndex(null); 
+          loadingSeatRef.current = null;
       }
   };
 
@@ -858,6 +852,7 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
   const handleToggleMyMute = async () => {
       if (!mySeat) return;
       const nextMutedState = !mySeat.isMuted;
+      // Optimistic Mute toggle is fine as it doesn't affect seat occupancy
       setRoom(prev => {
           const newSeats = prev.seats.map(s => s.userId === currentUser.id ? { ...s, isMuted: nextMutedState } : s);
           return { ...prev, seats: newSeats };
@@ -868,6 +863,7 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
 
   const handleLeaveSeat = async () => {
       if (!mySeat) return;
+      // Optimistic leave is fine
       setRoom(prev => {
           const newSeats = prev.seats.map(s => s.index === mySeat.index ? { ...s, userId: null, userName: null, userAvatar: null, giftCount: 0, adminRole: null, isMuted: false, frameId: null } : s);
           return { ...prev, seats: newSeats };
@@ -890,19 +886,21 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
       const file = e.target.files?.[0];
       if (file) {
           const isGif = file.type === 'image/gif';
-          const MAX_FILE_SIZE = isGif ? 750 * 1024 : 5 * 1024 * 1024; 
+          // Lower limit for raw file before even attempting compression
+          const MAX_RAW_SIZE = 5 * 1024 * 1024; 
 
-          if (isGif && file.size > MAX_FILE_SIZE) { 
-               alert(language === 'ar' ? "حجم الملف المتحرك (GIF) كبير جداً. يرجى اختيار ملف أقل من 750 كيلوبايت لضمان الحفظ." : "GIF file too large. Please choose a file under 750KB to ensure saving.");
+          if (file.size > MAX_RAW_SIZE) {
+               alert(language === 'ar' ? "الملف كبير جداً. الحد الأقصى 5 ميجا." : "File too large. Max 5MB.");
                return;
           }
 
           try {
               const isOuter = type === 'outer';
-              const compressed = await compressImage(file, 1280, 0.8, isOuter);
+              // Use aggressive compression quality (0.4)
+              const compressed = await compressImage(file, 800, 0.4, isGif);
               
-              if (compressed.length > 1000000) { 
-                  alert(language === 'ar' ? "الصورة بعد المعالجة لا تزال كبيرة جداً. حاول استخدام صورة أصغر أو ثابتة." : "Processed image is still too large. Please try a smaller or static image.");
+              if (compressed.length > 950000) { 
+                  alert(language === 'ar' ? "الصورة بعد المعالجة لا تزال كبيرة جداً. حاول استخدام صورة أصغر أو ثابتة." : "Processed image is still too large for database. Please try a smaller/static image.");
                   return;
               }
 
@@ -911,19 +909,20 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
               } else {
                   await handleUpdateRoom({ backgroundImage: compressed });
               }
+              alert(language === 'ar' ? "تم تحديث الخلفية بنجاح" : "Background updated successfully");
           } catch (error: any) {
               console.error("Image processing/upload failed", error);
               if (error.code === 'resource-exhausted' || error.message?.includes('too large') || error.toString().includes('too large')) {
                    alert(language === 'ar' ? "فشل الحفظ: حجم البيانات كبير جداً (تجاوز الحد المسموح)." : "Save failed: Data too large (exceeded limit).");
               } else {
-                   alert(language === 'ar' ? "فشل تحديث الصورة." : "Failed to update image.");
+                   alert(language === 'ar' ? "فشل معالجة الصورة." : "Failed to process image.");
               }
           }
       }
   };
 
   const handleKickSeat = (seatIndex: number) => {
-      pendingKickSeats.current.add(seatIndex);
+      // Keep optimistic update for kicking, as it's an admin action
       setRoom(prev => {
           const newSeats = [...prev.seats];
           if (newSeats[seatIndex]) newSeats[seatIndex] = { ...newSeats[seatIndex], userId: null, userName: null, userAvatar: null, giftCount: 0, adminRole: null, isMuted: false, frameId: null };
@@ -943,7 +942,6 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
   const executeBan = async (durationInMinutes: number) => {
       if (!userToBan) return;
       const uid = userToBan;
-      pendingBannedUsers.current.add(uid);
       
       const targetSeat = seats.find(s => s.userId === uid || (s as any).uid === uid);
       if (targetSeat) handleKickSeat(targetSeat.index);
@@ -1107,7 +1105,11 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
                              </>
                          ) : <div className="text-gray-400 text-[10px] text-center w-full h-full flex items-center justify-center">{t('host')}</div>}
                     </div>
-                    {seat.userId && <div className="mt-1 max-w-[60px] truncate text-[9px] text-white/90 bg-white/10 px-2 py-0.5 rounded-full">{seat.userName}</div>}
+                    {seat.userId && (
+                        <div className="mt-1 w-[70px] bg-white/10 rounded-full px-2 py-0.5 overflow-hidden">
+                            <div className="text-[9px] text-white/90 font-medium whitespace-nowrap animate-marquee">{seat.userName}</div>
+                        </div>
+                    )}
                     <div className="mt-0.5 bg-black/50 backdrop-blur px-2 py-0.5 rounded-full text-[8px] text-yellow-300 border border-yellow-500/30 flex items-center gap-1"><GiftIcon className="w-2 h-2" /> {seat.giftCount}</div>
                  </div>
                  )
@@ -1134,7 +1136,13 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
                             </>
                         ) : (seat.isLocked ? <Lock className="w-3 h-3 text-red-400/70" /> : <span className="text-white/20 text-[9px] font-bold">{seat.index}</span>)}
                     </div>
-                    <div className="mt-1 max-w-[50px] truncate text-[8px] text-white/90 bg-white/10 px-2 py-0.5 rounded-full">{seat.userId ? seat.userName : (seat.isLocked ? t('lock') : '')}</div>
+                    {seat.userId ? (
+                        <div className="mt-1 w-[55px] bg-white/10 rounded-full px-2 py-0.5 overflow-hidden">
+                            <div className="text-[8px] text-white/90 font-medium whitespace-nowrap animate-marquee">{seat.userName}</div>
+                        </div>
+                    ) : (
+                        <div className="mt-1 text-[8px] text-white/50">{seat.isLocked ? t('lock') : ''}</div>
+                    )}
                     <div className="mt-0.5 text-[7px] text-yellow-500 font-mono flex items-center gap-0.5">{seat.giftCount > 0 && <><GiftIcon className="w-2 h-2"/> {seat.giftCount}</>}</div>
                  </div>
                  )
@@ -1250,6 +1258,7 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
           </div>
       </div>
 
+      {/* Options Menu, Music Player, Import View, Gift Panel, Modals... (unchanged structure, just ensured they are rendered) */}
       {showOptionsMenu && (
           <div className="absolute inset-0 z-[70] flex flex-col justify-end bg-black/60 backdrop-blur-sm animate-in slide-in-from-bottom-10" onClick={() => setShowOptionsMenu(false)}>
               <div className="bg-gray-900/30 backdrop-blur-3xl border-t border-white/20 rounded-t-3xl p-5 shadow-2xl" onClick={e => e.stopPropagation()}>
@@ -1338,6 +1347,7 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
 
       {showImportView && (
           <div className="absolute inset-0 z-[100] bg-gray-900/30 backdrop-blur-3xl flex flex-col animate-in slide-in-from-bottom-20">
+              {/* Import View Content */}
               <div className="p-4 bg-gray-800/50 backdrop-blur border-b border-white/10 flex items-center gap-3">
                   <button onClick={() => { setShowImportView(false); setStagedFiles([]); }} className="p-2 rounded-full hover:bg-white/10 text-white">
                       <ArrowLeft className="w-6 h-6 rtl:rotate-180" />

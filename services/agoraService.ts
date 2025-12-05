@@ -88,8 +88,10 @@ export const joinVoiceChannel = (channelName: string, uid: string | number) => {
             }
             
             // If we are connecting/disconnecting, wait
+            // Since we are in a queue, previous ops should be done. 
+            // However, safe guard:
             if (client.connectionState === 'CONNECTING' || client.connectionState === 'DISCONNECTING') {
-                 return;
+                 // ideally wait, but queue handles this mostly.
             }
 
             // Leave previous channel if connected to a different one

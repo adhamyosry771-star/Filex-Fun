@@ -43,16 +43,17 @@ import {
 } from '../types';
 
 // --- Helper to Sanitize Data for Firestore ---
+// CRITICAL FIX: Ensure NO undefined values are passed to Firestore
 const sanitizeSeat = (seat: any): RoomSeat => ({
-    index: seat.index,
-    userId: seat.userId ?? null,
-    userName: seat.userName ?? null,
-    userAvatar: seat.userAvatar ?? null,
-    frameId: seat.frameId ?? null,
+    index: Number(seat.index),
+    userId: seat.userId || null, 
+    userName: seat.userName || null,
+    userAvatar: seat.userAvatar || null,
+    frameId: seat.frameId || null,
     isMuted: !!seat.isMuted,
     isLocked: !!seat.isLocked,
-    giftCount: seat.giftCount || 0,
-    adminRole: seat.adminRole ?? null,
+    giftCount: Number(seat.giftCount) || 0,
+    adminRole: seat.adminRole || null,
 });
 
 // --- Auth ---
@@ -113,7 +114,9 @@ export const createUserProfile = async (uid: string, data: Partial<User>) => {
 
 export const updateUserProfile = async (uid: string, data: Partial<User>) => {
   const docRef = doc(db, 'users', uid);
-  await updateDoc(docRef, data);
+  // Filter out undefined values
+  const cleanData = JSON.parse(JSON.stringify(data));
+  await updateDoc(docRef, cleanData);
 };
 
 export const listenToUserProfile = (uid: string, callback: (user: User | null) => void): Unsubscribe => {
@@ -248,7 +251,7 @@ export const createRoom = async (title: string, thumbnail: string, host: User, h
     const roomRef = doc(collection(db, 'rooms'));
     const newRoom: Room = {
         id: roomRef.id,
-        displayId: host.id, // Use User ID as Room ID
+        displayId: host.id,
         title,
         hostName: host.name,
         hostAvatar: host.avatar,
@@ -272,11 +275,11 @@ export const createRoom = async (title: string, thumbnail: string, host: User, h
         isHot: false,
         isOfficial: false,
         isActivities: false,
-        isLocked: false, // Default unlocked
-        password: '', // Default no password
+        isLocked: false,
+        password: '',
         contributors: {},
         cupStartTime: Date.now(), 
-        bannedUsers: {}, // Initialize as map
+        bannedUsers: {},
         admins: []
     };
     await setDoc(roomRef, newRoom);
@@ -361,6 +364,7 @@ export const takeSeat = async (roomId: string, seatIndex: number, user: User) =>
         const roomData = roomDoc.data() as Room;
         let seats = [...roomData.seats];
         
+        // Prevent double booking
         if (seats[seatIndex] && seats[seatIndex].userId && seats[seatIndex].userId !== user.id) {
              throw "Seat occupied";
         }
@@ -369,9 +373,10 @@ export const takeSeat = async (roomId: string, seatIndex: number, user: User) =>
              throw "Seat locked";
         }
         
+        // Remove from old seat if exists
         const currentSeatIndex = seats.findIndex(s => s.userId === user.id);
         if (currentSeatIndex !== -1) {
-            seats[currentSeatIndex] = {
+            seats[currentSeatIndex] = sanitizeSeat({
                 index: currentSeatIndex,
                 userId: null,
                 userName: null,
@@ -381,9 +386,10 @@ export const takeSeat = async (roomId: string, seatIndex: number, user: User) =>
                 isLocked: seats[currentSeatIndex].isLocked,
                 giftCount: 0,
                 adminRole: null
-            };
+            });
         }
 
+        // Initialize seat if undefined
         if (!seats[seatIndex]) {
             seats[seatIndex] = {
                 index: seatIndex,
@@ -398,19 +404,19 @@ export const takeSeat = async (roomId: string, seatIndex: number, user: User) =>
             };
         }
 
-        seats[seatIndex] = {
+        // Assign new seat - EXPLICIT NULLS for safety
+        seats[seatIndex] = sanitizeSeat({
             index: seatIndex,
             userId: user.id,
             userName: user.name,
             userAvatar: user.avatar,
-            frameId: user.equippedFrame ?? null,
+            frameId: user.equippedFrame || null,
             isMuted: false,
             isLocked: seats[seatIndex].isLocked,
             giftCount: 0,
-            adminRole: user.adminRole ?? null
-        };
+            adminRole: user.adminRole || null
+        });
         
-        seats = seats.map(sanitizeSeat);
         transaction.update(roomRef, { seats });
     });
 };
@@ -452,7 +458,7 @@ export const kickUserFromSeat = async (roomId: string, seatIndex: number) => {
         let seats = [...roomData.seats];
         
         if (seats[seatIndex]) {
-            seats[seatIndex] = { 
+            seats[seatIndex] = sanitizeSeat({ 
                 index: seats[seatIndex].index,
                 userId: null, 
                 userName: null, 
@@ -462,8 +468,7 @@ export const kickUserFromSeat = async (roomId: string, seatIndex: number) => {
                 isMuted: false,
                 isLocked: seats[seatIndex].isLocked,
                 adminRole: null
-            };
-            seats = seats.map(sanitizeSeat);
+            });
             transaction.update(roomRef, { seats });
         }
     });
@@ -534,9 +539,10 @@ export const removeRoomAdmin = async (roomId: string, userId: string) => {
 // --- Messaging ---
 export const sendMessage = async (roomId: string, message: ChatMessage) => {
     const cleanMessage = { ...message };
-    if (cleanMessage.frameId === undefined) cleanMessage.frameId = null;
-    if (cleanMessage.bubbleId === undefined) cleanMessage.bubbleId = null;
-    if (cleanMessage.adminRole === undefined) cleanMessage.adminRole = null;
+    // Ensure no undefined
+    Object.keys(cleanMessage).forEach(key => {
+        if ((cleanMessage as any)[key] === undefined) (cleanMessage as any)[key] = null;
+    });
 
     await addDoc(collection(db, `rooms/${roomId}/messages`), cleanMessage);
 };

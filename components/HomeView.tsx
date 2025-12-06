@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { Users, Search, Bell, Plus, X, Image as ImageIcon, Upload, Flame, Tag, UserPlus, BadgeCheck, ChevronRight, ChevronLeft, Gamepad2, Lock, LayoutGrid, List, Info, Home as HomeIcon, Clock, History } from 'lucide-react';
+import { Users, Search, Bell, Plus, X, Image as ImageIcon, Upload, Flame, Tag, UserPlus, BadgeCheck, ChevronRight, ChevronLeft, Gamepad2, Lock, LayoutGrid, List, Info, Home as HomeIcon, Clock, History, Quote } from 'lucide-react';
 import { Room, Language, User, Banner } from '../types';
 import { createRoom, listenToBanners } from '../services/firebaseService';
 import { auth } from '../firebaseConfig';
@@ -330,6 +330,18 @@ const HomeView: React.FC<HomeViewProps> = ({ rooms, onJoinRoom, language, userPr
                               {room.isHot && !isOfficial && !isActivities && <Flame className="w-4 h-4 text-orange-500 fill-orange-500 animate-pulse shrink-0" />}
                           </div>
                       </div>
+                      
+                      {/* Luxurious Glass Description Frame */}
+                      {room.description && (
+                          <div className="mt-1 px-2 py-1.5 bg-gradient-to-r from-white/5 to-transparent border border-white/5 rounded-lg backdrop-blur-md shadow-sm w-fit max-w-full">
+                              <div className="flex items-center gap-1.5 opacity-80">
+                                  <Quote className="w-2.5 h-2.5 text-brand-300 fill-brand-300/20" />
+                                  <p className="text-[9px] text-gray-200 line-clamp-1 leading-tight italic font-light tracking-wide">
+                                      {room.description}
+                                  </p>
+                              </div>
+                          </div>
+                      )}
                   </div>
                   <div className="pl-2">
                       <button className="p-2 bg-white/5 rounded-full text-gray-400 hover:bg-brand-600 hover:text-white transition">

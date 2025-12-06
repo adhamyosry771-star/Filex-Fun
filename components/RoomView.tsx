@@ -1,15 +1,102 @@
-import React, { useState, useEffect, useRef } from 'react';
+
+import React, { useState, useEffect, useRef, memo } from 'react';
 import { ArrowLeft, Send, Heart, Share2, Gift as GiftIcon, Users, Crown, Mic, MicOff, Lock, Unlock, Settings, Image as ImageIcon, X, Info, Minimize2, LogOut, BadgeCheck, Loader2, Upload, Shield, Trophy, Bot, Volume2, VolumeX, ArrowDownCircle, Ban, Trash2, UserCog, UserMinus, Zap, BarChart3, Gamepad2, Clock, LayoutGrid, Flag, Music, Play, Pause, SkipForward, SkipBack, Hexagon, ListMusic, Plus, Check, Search, Circle, CheckCircle2, KeyRound } from 'lucide-react';
 import { Room, ChatMessage, Gift, Language, User, RoomSeat } from '../types';
 import { GIFTS, STORE_ITEMS, ROOM_BACKGROUNDS, VIP_TIERS, ADMIN_ROLES } from '../constants';
 import { listenToMessages, sendMessage, takeSeat, leaveSeat, updateRoomDetails, sendGiftTransaction, toggleSeatLock, toggleSeatMute, decrementViewerCount, listenToRoom, kickUserFromSeat, banUserFromRoom, unbanUserFromRoom, removeRoomAdmin, addRoomAdmin, searchUserByDisplayId, enterRoom, exitRoom, listenToRoomViewers, getUserProfile } from '../services/firebaseService';
-import { joinVoiceChannel, leaveVoiceChannel, toggleMicMute, publishMicrophone, unpublishMicrophone, toggleAllRemoteAudio, listenToVolume, playMusicFile, stopMusic, setMusicVolume, seekMusic, pauseMusic, resumeMusic, getMusicTrack } from '../services/agoraService';
+import { joinVoiceChannel, leaveVoiceChannel, toggleMicMute, publishMicrophone, unpublishMicrophone, toggleAllRemoteAudio, listenToVolume, playMusicFile, stopMusic, setMusicVolume, seekMusic, pauseMusic, resumeMusic, getMusicTrack, preloadMicrophone } from '../services/agoraService';
 import { generateAiHostResponse } from '../services/geminiService';
 import { compressImage } from '../services/imageService';
 import { saveSongToDB, getSongsFromDB, deleteSongFromDB, SavedSong } from '../services/musicStorageService';
 import UserProfileModal from './UserProfileModal';
 import RoomLeaderboard from './RoomLeaderboard';
 import FullProfileView from './FullProfileView';
+
+// --- HELPER FUNCTIONS ---
+const getFrameClass = (id?: string | null) => {
+    if (!id) return 'border border-white/20';
+    return STORE_ITEMS.find(i => i.id === id)?.previewClass || 'border border-white/20';
+};
+
+// --- MEMOIZED SEAT COMPONENT (Crucial for performance) ---
+interface SeatItemProps {
+    seat: RoomSeat;
+    isSpeaking: boolean;
+    isLoading: boolean;
+    onClick: (index: number, userId: string | null) => void;
+    isHostSeat?: boolean;
+}
+
+const SeatItem = memo(({ seat, isSpeaking, isLoading, onClick, isHostSeat }: SeatItemProps) => {
+    // Determine visuals
+    // Host stays w-16 (64px). Regular seats increased from w-12 (48px) to w-[50px] (~4% increase)
+    const sizeClass = isHostSeat ? "w-16 h-16" : "w-[50px] h-[50px]";
+    const frameClass = seat.userId ? getFrameClass(seat.frameId) : 'border-2 border-white/20 border-dashed';
+    
+    // VIP 8 Styling for Name
+    const nameClass = seat.vipLevel === 8 
+        ? "text-red-500 font-black drop-shadow-[0_0_5px_rgba(239,68,68,0.8)]" 
+        : "text-white/90 font-medium";
+
+    // Marquee Logic: Only animate if name is long
+    // Host width ~70px (approx 10-12 chars), User width ~55px (approx 7-8 chars)
+    const charLimit = isHostSeat ? 10 : 7;
+    const shouldScroll = (seat.userName?.length || 0) > charLimit;
+
+    return (
+        <div className="flex flex-col items-center relative group w-full">
+            <div onClick={() => onClick(seat.index, seat.userId)} className={`${sizeClass} rounded-full relative bg-black/40 backdrop-blur overflow-visible cursor-pointer transition transform active:scale-95 p-[3px] ${frameClass} flex items-center justify-center`}>
+                {isLoading ? (
+                    <Loader2 className={`${isHostSeat ? 'w-6 h-6' : 'w-5 h-5'} text-brand-500 animate-spin absolute inset-0 m-auto`} />
+                ) : seat.userId ? (
+                    <>
+                        <img src={seat.userAvatar!} className="w-full h-full rounded-full object-cover relative z-10" loading="lazy" />
+                        {/* Sound Wave Animation - Only renders when speaking */}
+                        {!seat.isMuted && isSpeaking && (
+                            <>
+                                <div className={`absolute inset-0 rounded-full border-2 ${isHostSeat ? 'border-brand-400' : 'border-green-400'} opacity-60 animate-[ping_1.5s_cubic-bezier(0,0,0.2,1)_infinite]`}></div>
+                                <div className={`absolute inset-0 rounded-full border-2 ${isHostSeat ? 'border-brand-300' : 'border-green-300'} opacity-40 animate-[ping_2s_cubic-bezier(0,0,0.2,1)_infinite]`}></div>
+                            </>
+                        )}
+                        {seat.isMuted && <div className="absolute inset-0 rounded-full bg-black/50 flex items-center justify-center z-20"><MicOff className={`${isHostSeat ? 'w-4 h-4' : 'w-3 h-3'} text-red-500`}/></div>}
+                        {isHostSeat && <div className="absolute -top-3 -right-1 bg-yellow-500 p-1 rounded-full z-20"><Crown className="w-2.5 h-2.5 text-black" /></div>}
+                    </>
+                ) : (
+                    isHostSeat ? <div className="text-gray-400 text-[10px] text-center">Host</div> 
+                    : (seat.isLocked ? <Lock className="w-3 h-3 text-red-400/70" /> : <span className="text-white/20 text-[9px] font-bold">{seat.index}</span>)
+                )}
+            </div>
+            {seat.userId ? (
+                <div className={`mt-1 ${isHostSeat ? 'w-[70px]' : 'w-[55px]'} bg-white/10 rounded-full px-2 py-0.5 overflow-hidden flex justify-center`}>
+                    <div className={`text-[${isHostSeat ? '9px' : '8px'}] ${nameClass} whitespace-nowrap ${shouldScroll ? 'animate-marquee inline-block' : 'truncate'}`}>
+                        {seat.userName}
+                    </div>
+                </div>
+            ) : (
+                <div className="mt-1 text-[8px] text-white/50">{seat.isLocked ? 'Locked' : ''}</div>
+            )}
+            <div className="mt-0.5 bg-black/50 backdrop-blur px-2 py-0.5 rounded-full text-[8px] text-yellow-300 border border-yellow-500/30 flex items-center gap-1">
+                {seat.giftCount > 0 && <><GiftIcon className="w-2 h-2" /> {seat.giftCount}</>}
+            </div>
+        </div>
+    );
+}, (prev, next) => {
+    // Custom comparison function for React.memo to prevent unnecessary re-renders
+    return (
+        prev.seat.userId === next.seat.userId &&
+        prev.seat.userAvatar === next.seat.userAvatar &&
+        prev.seat.userName === next.seat.userName &&
+        prev.seat.isMuted === next.seat.isMuted &&
+        prev.seat.isLocked === next.seat.isLocked &&
+        prev.seat.giftCount === next.seat.giftCount &&
+        prev.seat.frameId === next.seat.frameId &&
+        prev.seat.vipLevel === next.seat.vipLevel && // Include vipLevel in check
+        prev.isSpeaking === next.isSpeaking &&
+        prev.isLoading === next.isLoading
+    );
+});
+
+// --- MAIN COMPONENT ---
 
 interface RoomViewProps {
   room: Room;
@@ -76,7 +163,6 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
 
   const [seatToConfirm, setSeatToConfirm] = useState<number | null>(null);
   const [loadingSeatIndex, setLoadingSeatIndex] = useState<number | null>(null);
-  // Ref to track loading seat index inside closures (listeners)
   const loadingSeatRef = useRef<number | null>(null);
 
   const [floatingHearts, setFloatingHearts] = useState<{id: number, left: number}[]>([]);
@@ -108,6 +194,7 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
   const viewersRef = useRef<User[]>([]);
 
   const [speakingUsers, setSpeakingUsers] = useState<Set<string>>(new Set());
+  const lastSpeakingUpdate = useRef<number>(0);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   
@@ -201,6 +288,7 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
           isLocked: false, 
           giftCount: 0,
           frameId: null,
+          vipLevel: 0,
           adminRole: null
       };
   });
@@ -214,17 +302,19 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
 
   const activeSeats = seats.filter(s => s.userId);
 
-  // --- LIFECYCLE MANAGEMENT: ENTRY, EXIT, VOICE ---
+  // --- LIFECYCLE MANAGEMENT ---
   useEffect(() => {
       const uid = currentUser.uid;
       const agoraUid = currentUser.uid || currentUser.id;
 
-      // 1. Join Agora Voice
+      // 1. Join Agora Voice (Background)
       if (agoraUid) {
+          // IMPORTANT: Preload mic here for instant connection later
+          preloadMicrophone(); 
           joinVoiceChannel(room.id, agoraUid);
       }
 
-      // 2. Firebase Enter (Update Real-Time Viewer Count)
+      // 2. Firebase Enter
       if (uid) {
           enterRoom(room.id, currentUser);
       }
@@ -247,10 +337,15 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
   }, [room.id]);
 
   useEffect(() => {
+      // Throttled volume listener to prevent UI lag
       listenToVolume((volumes) => {
+          const now = Date.now();
+          if (now - lastSpeakingUpdate.current < 200) return; // Limit updates to 5 times/sec max
+          lastSpeakingUpdate.current = now;
+
           const speaking = new Set<string>();
           volumes.forEach(v => {
-              if (v.level > 5) {
+              if (v.level > 10) { // Slightly higher threshold to reduce noise
                   let authUid = String(v.uid);
                   if (v.uid === 0 && currentUserRef.current.uid) {
                       authUid = currentUserRef.current.uid;
@@ -266,7 +361,13 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
                   }
               }
           });
-          setSpeakingUsers(speaking);
+          
+          setSpeakingUsers(prev => {
+              // Only update state if set contents actually changed (Reference equality check)
+              if (prev.size !== speaking.size) return speaking;
+              for (let user of speaking) if (!prev.has(user)) return speaking;
+              return prev;
+          });
       });
       return () => listenToVolume(() => {});
   }, []);
@@ -300,26 +401,20 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
   useEffect(() => {
       const unsubscribe = listenToRoom(initialRoom.id, (updatedRoom) => {
           if (updatedRoom) {
-              // Ensure we don't clear loading state until the server confirms the change
-              // or confirms it failed (by showing another user or empty when we expected us)
               if (loadingSeatRef.current !== null) {
                   const targetIdx = loadingSeatRef.current;
                   const targetSeat = updatedRoom.seats[targetIdx];
                   
-                  // Case 1: Success - Server says we are in the seat
                   if (targetSeat && targetSeat.userId === currentUser.id) {
                       setLoadingSeatIndex(null);
                       loadingSeatRef.current = null;
                   }
-                  // Case 2: Failure - Server says someone else is in the seat (Race condition lost)
                   else if (targetSeat && targetSeat.userId && targetSeat.userId !== currentUser.id) {
                       setLoadingSeatIndex(null);
                       loadingSeatRef.current = null;
                   }
-                  // Case 3: Still waiting - Seat is empty or same as before, keep spinning...
               }
 
-              // Update Room State strictly from Server
               setRoom(updatedRoom);
 
               if (!showRoomSettings) {
@@ -345,7 +440,6 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
       return () => unsubscribe();
   }, [initialRoom.id, onAction, showRoomSettings, currentUser.uid, currentUser.id]);
 
-  // Safety fallback for loading state
   useEffect(() => {
       const myCurrentSeat = room.seats.find(s => s.userId === currentUser.id);
       if (myCurrentSeat && loadingSeatRef.current === myCurrentSeat.index) {
@@ -364,7 +458,6 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
               console.warn("Mic publish info:", err);
           });
       } else {
-          // Only unpublish if we are definitely not seated and not loading a seat
           if (loadingSeatIndex === null) {
               unpublishMicrophone().catch(err => console.warn("Mic unpublish info:", err));
           }
@@ -399,6 +492,13 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
          if (unsubscribe) unsubscribe();
      };
   }, [room?.id]);
+
+  // Auto-scroll to bottom whenever messages change
+  useEffect(() => {
+    if (messagesEndRef.current) {
+        messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [messages]);
 
   useEffect(() => {
       return () => {
@@ -437,7 +537,6 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
                   timestamp: Date.now(),
                   vipLevel: 0
               };
-              // Add Optimistic AI Message
               setMessages(prev => [...prev, aiMsg]);
               await sendMessage(room.id, aiMsg);
           } catch (e) { console.error("AI Host Error:", e); }
@@ -533,7 +632,6 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
     return dict[key]?.[language] || key;
   };
 
-  // ... (Import Logic methods remain same) ...
   const handleInitialFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
       const files = e.target.files;
       if (files && files.length > 0) {
@@ -655,7 +753,7 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
       adminRole: currentUser.adminRole || null
     };
     
-    // OPTIMISTIC UPDATE: Add message immediately to state
+    // OPTIMISTIC UPDATE
     setMessages(prev => [userMsg, ...prev]);
     setInputValue('');
     
@@ -749,7 +847,6 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
           adminRole: currentUser.adminRole || null
         };
         
-        // Optimistic
         setMessages(prev => [giftMsg, ...prev]);
         await sendMessage(room.id, giftMsg);
         
@@ -797,12 +894,10 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
       const index = seatToConfirm;
       setSeatToConfirm(null); 
       setLoadingSeatIndex(index);
-      loadingSeatRef.current = index; // Set Ref for listener to check
+      loadingSeatRef.current = index; 
       
       try { 
           await takeSeat(room.id, index, currentUser);
-          
-          // Safety Timeout: If server doesn't respond in 5s, reset loading
           setTimeout(() => {
               if (loadingSeatRef.current === index) {
                   setLoadingSeatIndex(null);
@@ -837,18 +932,16 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
 
   const handleLeaveRoomAction = () => {
       unpublishMicrophone();
-      
       if (isSeatedRef.current && currentUserRef.current) {
           leaveSeat(room.id, currentUserRef.current).catch(err => console.warn(err));
       }
-
       onAction('leave');
   };
 
   const handleToggleMyMute = async () => {
       if (!mySeat) return;
       const nextMutedState = !mySeat.isMuted;
-      // Optimistic Mute toggle is fine as it doesn't affect seat occupancy
+      // Optimistic Mute toggle
       setRoom(prev => {
           const newSeats = prev.seats.map(s => s.userId === currentUser.id ? { ...s, isMuted: nextMutedState } : s);
           return { ...prev, seats: newSeats };
@@ -859,9 +952,8 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
 
   const handleLeaveSeat = async () => {
       if (!mySeat) return;
-      // Optimistic leave is fine
       setRoom(prev => {
-          const newSeats = prev.seats.map(s => s.index === mySeat.index ? { ...s, userId: null, userName: null, userAvatar: null, giftCount: 0, adminRole: null, isMuted: false, frameId: null } : s);
+          const newSeats = prev.seats.map(s => s.index === mySeat.index ? { ...s, userId: null, userName: null, userAvatar: null, giftCount: 0, adminRole: null, isMuted: false, frameId: null, vipLevel: 0 } : s);
           return { ...prev, seats: newSeats };
       });
       unpublishMicrophone().catch(err => console.warn("Unpublish err", err));
@@ -882,7 +974,6 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
       const file = e.target.files?.[0];
       if (file) {
           const isGif = file.type === 'image/gif';
-          // Lower limit for raw file before even attempting compression
           const MAX_RAW_SIZE = 5 * 1024 * 1024; 
 
           if (file.size > MAX_RAW_SIZE) {
@@ -892,7 +983,6 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
 
           try {
               const isOuter = type === 'outer';
-              // Use improved compression: 1280px, 0.7 quality
               const compressed = await compressImage(file, 1280, 0.7, isGif);
               
               if (compressed.length > 950000) { 
@@ -918,10 +1008,9 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
   };
 
   const handleKickSeat = (seatIndex: number) => {
-      // Keep optimistic update for kicking, as it's an admin action
       setRoom(prev => {
           const newSeats = [...prev.seats];
-          if (newSeats[seatIndex]) newSeats[seatIndex] = { ...newSeats[seatIndex], userId: null, userName: null, userAvatar: null, giftCount: 0, adminRole: null, isMuted: false, frameId: null };
+          if (newSeats[seatIndex]) newSeats[seatIndex] = { ...newSeats[seatIndex], userId: null, userName: null, userAvatar: null, giftCount: 0, adminRole: null, isMuted: false, frameId: null, vipLevel: 0 };
           return { ...prev, seats: newSeats };
       });
       kickUserFromSeat(room.id, seatIndex);
@@ -999,11 +1088,6 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
       setShowLockSetupModal(false);
   };
 
-  const getFrameClass = (id?: string | null) => {
-      if (!id) return 'border border-white/20';
-      return STORE_ITEMS.find(i => i.id === id)?.previewClass || 'border border-white/20';
-  };
-
   const getBubbleClass = (id?: string | null) => {
       if (!id) return 'bg-white/10 text-white rounded-2xl';
       const item = STORE_ITEMS.find(i => i.id === id);
@@ -1033,14 +1117,13 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
   return (
     <div className="relative h-[100dvh] w-full bg-black flex flex-col overflow-hidden">
       
-      {/* FULL SCREEN BACKGROUND - High Clarity */}
+      {/* FULL SCREEN BACKGROUND */}
       <div className="absolute inset-0 z-0 bg-gray-900 overflow-hidden">
         <img 
           src={room.backgroundImage || room.thumbnail} 
           className="w-full h-full object-cover object-center transition-opacity duration-700" 
           alt="Room Background"
         />
-        {/* Subtle Gradient Overlay for Text Readability */}
         <div className="absolute inset-0 bg-gradient-to-b from-black/60 via-transparent to-black/80 z-0 pointer-events-none"></div>
       </div>
 
@@ -1084,68 +1167,28 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
 
       <div className="relative z-10 w-full px-2 pt-1 pb-1 shrink-0 flex flex-col items-center">
           <div className="flex justify-center mb-2 shrink-0">
-             {seats.slice(0, 1).map((seat) => {
-                 const isSpeaking = (seat.userId && speakingUsers.has(seat.userId)) || (isMusicPlaying && seat.userId === room.hostId);
-                 return (
-                 <div key={seat.index} className="flex flex-col items-center relative group">
-                    <div onClick={() => handleSeatClick(seat.index, seat.userId)} className={`w-16 h-16 rounded-full relative bg-black/40 backdrop-blur overflow-visible cursor-pointer transition transform active:scale-95 p-[3px] ${seat.userId ? getFrameClass(seat.frameId) : 'border-2 border-white/20 border-dashed'}`}>
-                         {loadingSeatIndex === seat.index ? <Loader2 className="w-6 h-6 text-brand-500 animate-spin absolute inset-0 m-auto" /> : seat.userId ? (
-                             <>
-                                <img src={seat.userAvatar!} className="w-full h-full rounded-full object-cover relative z-10" />
-                                {/* Beautiful Sound Wave for Host */}
-                                {!seat.isMuted && isSpeaking && (
-                                    <>
-                                        <div className="absolute inset-0 rounded-full border-4 border-brand-400 opacity-60 animate-[ping_1.5s_cubic-bezier(0,0,0.2,1)_infinite]"></div>
-                                        <div className="absolute inset-0 rounded-full border-4 border-brand-300 opacity-40 animate-[ping_2s_cubic-bezier(0,0,0.2,1)_infinite]"></div>
-                                    </>
-                                )}
-                                {seat.isMuted && <div className="absolute inset-0 rounded-full bg-black/50 flex items-center justify-center z-20"><MicOff className="w-4 h-4 text-red-500"/></div>}
-                                <div className="absolute -top-3 -right-1 bg-yellow-500 p-1 rounded-full z-20"><Crown className="w-2.5 h-2.5 text-black" /></div>
-                             </>
-                         ) : <div className="text-gray-400 text-[10px] text-center w-full h-full flex items-center justify-center">{t('host')}</div>}
-                    </div>
-                    {seat.userId && (
-                        <div className="mt-1 w-[70px] bg-white/10 rounded-full px-2 py-0.5 overflow-hidden">
-                            <div className="text-[9px] text-white/90 font-medium whitespace-nowrap animate-marquee">{seat.userName}</div>
-                        </div>
-                    )}
-                    <div className="mt-0.5 bg-black/50 backdrop-blur px-2 py-0.5 rounded-full text-[8px] text-yellow-300 border border-yellow-500/30 flex items-center gap-1"><GiftIcon className="w-2 h-2" /> {seat.giftCount}</div>
-                 </div>
-                 )
-             })}
+             {seats.slice(0, 1).map((seat) => (
+                 <SeatItem 
+                    key={seat.index} 
+                    seat={seat} 
+                    isSpeaking={seat.userId && speakingUsers.has(seat.userId) || false}
+                    isLoading={loadingSeatIndex === seat.index}
+                    onClick={handleSeatClick}
+                    isHostSeat={true}
+                 />
+             ))}
           </div>
           
           <div className="grid grid-cols-5 gap-y-3 gap-x-2 justify-items-center w-full max-w-sm shrink-0">
-             {seats.slice(1).map((seat) => {
-                 const isSpeaking = seat.userId && speakingUsers.has(seat.userId);
-                 return (
-                 <div key={seat.index} className="flex flex-col items-center w-full relative">
-                    <div onClick={() => handleSeatClick(seat.index, seat.userId)} className={`w-12 h-12 rounded-full relative bg-black/30 backdrop-blur p-[2px] ${seat.userId ? getFrameClass(seat.frameId) : 'border border-white/10 border-dashed'} flex items-center justify-center`}>
-                        {loadingSeatIndex === seat.index ? <Loader2 className="w-5 h-5 text-brand-500 animate-spin" /> : seat.userId ? (
-                            <>
-                                <img src={seat.userAvatar!} className="w-full h-full rounded-full object-cover relative z-10" />
-                                {/* Beautiful Sound Wave for Users */}
-                                {!seat.isMuted && isSpeaking && (
-                                    <>
-                                        <div className="absolute inset-0 rounded-full border-2 border-green-400 opacity-60 animate-[ping_1.5s_cubic-bezier(0,0,0.2,1)_infinite]"></div>
-                                        <div className="absolute inset-0 rounded-full border-2 border-green-300 opacity-40 animate-[ping_2s_cubic-bezier(0,0,0.2,1)_infinite]"></div>
-                                    </>
-                                )}
-                                {seat.isMuted && <div className="absolute inset-0 rounded-full bg-black/50 flex items-center justify-center z-20"><MicOff className="w-3 h-3 text-red-500"/></div>}
-                            </>
-                        ) : (seat.isLocked ? <Lock className="w-3 h-3 text-red-400/70" /> : <span className="text-white/20 text-[9px] font-bold">{seat.index}</span>)}
-                    </div>
-                    {seat.userId ? (
-                        <div className="mt-1 w-[55px] bg-white/10 rounded-full px-2 py-0.5 overflow-hidden">
-                            <div className="text-[8px] text-white/90 font-medium whitespace-nowrap animate-marquee">{seat.userName}</div>
-                        </div>
-                    ) : (
-                        <div className="mt-1 text-[8px] text-white/50">{seat.isLocked ? t('lock') : ''}</div>
-                    )}
-                    <div className="mt-0.5 text-[7px] text-yellow-500 font-mono flex items-center gap-0.5">{seat.giftCount > 0 && <><GiftIcon className="w-2 h-2"/> {seat.giftCount}</>}</div>
-                 </div>
-                 )
-             })}
+             {seats.slice(1).map((seat) => (
+                 <SeatItem 
+                    key={seat.index} 
+                    seat={seat} 
+                    isSpeaking={seat.userId && speakingUsers.has(seat.userId) || false}
+                    isLoading={loadingSeatIndex === seat.index}
+                    onClick={handleSeatClick}
+                 />
+             ))}
           </div>
 
           <div className="mt-2 w-full max-w-sm p-1.5 bg-white/5 backdrop-blur-md border border-white/10 rounded-2xl flex items-center justify-between shadow-lg animate-in fade-in slide-in-from-bottom-2 shrink-0">
@@ -1172,6 +1215,7 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
       </div>
 
       <div className="relative z-20 flex-1 flex flex-col min-h-0 bg-gradient-to-t from-black via-black/80 to-transparent w-full">
+          {/* Chat and Info Area */}
           <div className="px-4 py-2 mx-4 mt-1 bg-brand-900/60 backdrop-blur border-l-4 border-brand-500 rounded-r-lg mb-2 shadow-sm animate-in fade-in flex flex-col gap-1 shrink-0">
               <div className="flex items-start gap-2 border-b border-white/10 pb-1 mb-1">
                   <Shield className="w-3 h-3 text-gold-400 mt-0.5 shrink-0" />
@@ -1185,7 +1229,6 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
 
           <div className="flex-1 overflow-y-auto px-4 space-y-2 scrollbar-hide pb-2 mask-image-gradient relative w-full">
               {messages.map((msg) => {
-                  const isMe = msg.userId === currentUser.id;
                   const isOfficial = msg.userId === 'OFFECAL' || (msg.userId === room.hostId && room.hostId === 'OFFECAL');
                   const isAi = msg.userId === 'AI_HOST';
                   const isYellowMsg = msg.text.startsWith('🎉 تهانينا');
@@ -1257,7 +1300,7 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
           </div>
       </div>
 
-      {/* Options Menu, Music Player, Import View, Gift Panel, Modals... (unchanged structure, just ensured they are rendered) */}
+      {/* Options Menu */}
       {showOptionsMenu && (
           <div className="absolute inset-0 z-[70] flex flex-col justify-end bg-black/60 backdrop-blur-sm animate-in slide-in-from-bottom-10" onClick={() => setShowOptionsMenu(false)}>
               <div className="bg-gray-900/30 backdrop-blur-3xl border-t border-white/20 rounded-t-3xl p-5 shadow-2xl" onClick={e => e.stopPropagation()}>
@@ -1302,6 +1345,8 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
           </div>
       )}
 
+      {/* Music Mini Player, Gift Panel, Settings Modal, UserList... (All same as before, just kept structural) */}
+      
       {showMusicMiniPlayer && (
           <div className="absolute inset-0 z-[80] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4 animate-in fade-in">
               <div className="w-80 bg-gray-900/30 backdrop-blur-2xl border border-white/20 rounded-[2rem] p-6 shadow-2xl flex flex-col items-center relative overflow-hidden ring-1 ring-white/10">

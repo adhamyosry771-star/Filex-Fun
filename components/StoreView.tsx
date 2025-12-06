@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { ArrowLeft, Check, Lock, ShoppingBag, Clock, Package } from 'lucide-react';
+import { ArrowLeft, Check, Lock, ShoppingBag, Clock, Package, XCircle } from 'lucide-react';
 import { Language, User, StoreItem } from '../types';
 import { STORE_ITEMS } from '../constants';
 import { purchaseStoreItem, updateUserProfile } from '../services/firebaseService';
@@ -38,7 +38,10 @@ const StoreView: React.FC<StoreViewProps> = ({ user, language, onBack, onUpdateU
       days: { ar: 'يوم', en: 'd' },
       hours: { ar: 'ساعة', en: 'h' },
       extend: { ar: 'تمديد', en: 'Extend' },
-      noItems: { ar: 'لا تملك أي عناصر بعد', en: 'No items owned yet' }
+      noItems: { ar: 'لا تملك أي عناصر بعد', en: 'No items owned yet' },
+      default: { ar: 'الافتراضي', en: 'Default' },
+      remove: { ar: 'إزالة', en: 'Remove' },
+      free: { ar: 'مجاني', en: 'Free' }
     };
     return dict[key][language];
   };
@@ -67,7 +70,7 @@ const StoreView: React.FC<StoreViewProps> = ({ user, language, onBack, onUpdateU
 
   const handleEquip = async (itemId: string, type: 'frame' | 'bubble') => {
       if (!user.uid) return;
-      setLoading(itemId);
+      setLoading(itemId || 'default');
       try {
           const updates: Partial<User> = {};
           if (type === 'frame') updates.equippedFrame = itemId;
@@ -85,8 +88,40 @@ const StoreView: React.FC<StoreViewProps> = ({ user, language, onBack, onUpdateU
 
   const renderStoreGrid = (type: 'frame' | 'bubble') => {
       const items = STORE_ITEMS.filter(item => item.type === type);
+      const isDefaultEquipped = type === 'frame' ? !user.equippedFrame : !user.equippedBubble;
+
       return (
         <div className="grid grid-cols-2 gap-4">
+          
+          {/* Default / Remove Item Card */}
+          <div className="bg-gray-800 rounded-2xl p-4 flex flex-col items-center relative border border-gray-700 hover:border-gray-500 transition">
+              {isDefaultEquipped && (
+                  <div className="absolute top-2 right-2 bg-green-500 text-white text-[10px] px-2 py-0.5 rounded-full font-bold shadow">
+                      {t('equipped')}
+                  </div>
+              )}
+              <div className="w-20 h-20 mb-3 flex items-center justify-center relative">
+                  {type === 'frame' ? (
+                      <div className="w-16 h-16 rounded-full overflow-hidden relative p-1 border border-white/10">
+                          <img src={user.avatar} className="w-full h-full rounded-full object-cover grayscale opacity-70" alt="default" />
+                      </div>
+                  ) : (
+                      <div className="px-3 py-2 text-xs text-white rounded-lg bg-white/10 rounded-tr-none border border-white/10">
+                          Hi!
+                      </div>
+                  )}
+              </div>
+              <h3 className="font-bold text-sm mb-1 text-gray-300">{t('default')}</h3>
+              <div className="text-xs font-mono mb-3 text-gray-500">
+                  {t('free')}
+              </div>
+              {isDefaultEquipped ? (
+                  <button disabled className="w-full py-2 rounded-lg text-xs font-bold bg-gray-700 text-gray-400 cursor-default flex items-center justify-center gap-1"><Check className="w-3 h-3"/> {t('equipped')}</button>
+              ) : (
+                  <button onClick={() => handleEquip('', type)} disabled={loading === 'default'} className="w-full py-2 rounded-lg text-xs font-bold bg-gray-600 text-white hover:bg-gray-500 flex items-center justify-center gap-1">{loading === 'default' ? '...' : <><XCircle className="w-3 h-3"/> {t('remove')}</>}</button>
+              )}
+          </div>
+
           {items.map(item => {
             const expiry = user.inventory?.[item.id] || 0;
             const isOwned = expiry > currentTime;

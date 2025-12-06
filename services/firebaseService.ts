@@ -55,6 +55,7 @@ const sanitizeSeat = (seat: any): RoomSeat => ({
     isMuted: !!seat.isMuted,
     isLocked: !!seat.isLocked,
     giftCount: Number(seat.giftCount) || 0,
+    vipLevel: Number(seat.vipLevel) || 0,
     adminRole: seat.adminRole || null,
 });
 
@@ -248,6 +249,7 @@ export const resetAllGhostUsers = async () => {
       isLocked: false, 
       giftCount: 0,
       frameId: null,
+      vipLevel: 0,
       adminRole: null
   }));
 
@@ -345,6 +347,7 @@ export const createRoom = async (title: string, thumbnail: string, host: User, h
             isLocked: false, 
             giftCount: 0,
             frameId: null,
+            vipLevel: 0,
             adminRole: null
         })),
         isBanned: false,
@@ -461,6 +464,7 @@ export const takeSeat = async (roomId: string, seatIndex: number, user: User) =>
                 isMuted: false,
                 isLocked: seats[currentSeatIndex].isLocked,
                 giftCount: 0,
+                vipLevel: 0,
                 adminRole: null
             });
         }
@@ -476,6 +480,7 @@ export const takeSeat = async (roomId: string, seatIndex: number, user: User) =>
                 isLocked: false,
                 giftCount: 0,
                 frameId: null,
+                vipLevel: 0,
                 adminRole: null
             };
         }
@@ -490,6 +495,7 @@ export const takeSeat = async (roomId: string, seatIndex: number, user: User) =>
             isMuted: false,
             isLocked: seats[seatIndex].isLocked,
             giftCount: 0,
+            vipLevel: user.vipLevel || 0,
             adminRole: user.adminRole || null
         });
         
@@ -515,6 +521,7 @@ export const leaveSeat = async (roomId: string, user: User) => {
                     giftCount: 0, 
                     isMuted: false,
                     isLocked: s.isLocked,
+                    vipLevel: 0,
                     adminRole: null
                 });
             }
@@ -543,6 +550,7 @@ export const kickUserFromSeat = async (roomId: string, seatIndex: number) => {
                 giftCount: 0, 
                 isMuted: false,
                 isLocked: seats[seatIndex].isLocked,
+                vipLevel: 0,
                 adminRole: null
             });
             transaction.update(roomRef, { seats });
@@ -936,6 +944,7 @@ export const sendGiftTransaction = async (roomId: string, senderUid: string, tar
                     isLocked: false,
                     giftCount: 0,
                     frameId: null,
+                    vipLevel: 0,
                     adminRole: null
                  });
              }

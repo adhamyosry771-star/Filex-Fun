@@ -34,13 +34,8 @@ export const initializeAgora = async () => {
     log('Initializing Client...');
     client = AgoraRTC.createClient({ mode: "rtc", codec: "vp8" });
     
-    // Enable Volume Indicator with low interval for fast visual feedback (50ms)
+    // Enable Volume Indicator
     client.enableAudioVolumeIndicator();
-    // Use a custom configuration if the SDK supports passing interval here, 
-    // otherwise default is usually 200ms. If needed, re-check Agora docs for version 4.x specifics on setting interval.
-    // In v4.x, enableAudioVolumeIndicator takes no args or interval. 
-    // Actually, in v4.x, it's client.enableAudioVolumeIndicator(); and the event fires every 200ms by default.
-    // We can't easily change the 200ms in basic config, but we can ensure we handle it efficiently.
     
     client.on("volume-indicator", (volumes) => {
         if (volumeCallback) volumeCallback(volumes);
@@ -74,6 +69,24 @@ export const listenToVolume = (cb: (volumes: { uid: string | number, level: numb
     volumeCallback = cb;
 };
 
+// --- PRELOAD MICROPHONE FOR INSTANT ACCESS ---
+export const preloadMicrophone = async () => {
+    if (localAudioTrack) return; // Already ready
+    try {
+        localAudioTrack = await AgoraRTC.createMicrophoneAudioTrack({
+            encoderConfig: "high_quality_stereo", 
+            AEC: true, 
+            ANS: true,
+            AGC: true
+        });
+        // Important: Keep it disabled/muted initially until user clicks the button
+        await localAudioTrack.setEnabled(false); 
+        log('Mic Preloaded successfully');
+    } catch (e) {
+        console.warn("Mic Preload failed (permission might be needed on click)", e);
+    }
+};
+
 // 1. Join Channel (FAST & ROBUST)
 export const joinVoiceChannel = (channelName: string, uid: string | number) => {
     // We queue joins to avoid "Join while leaving" errors, but we execute fast
@@ -82,18 +95,14 @@ export const joinVoiceChannel = (channelName: string, uid: string | number) => {
             if (!client) await initializeAgora();
             if (!client) return;
 
+            // Preload mic in background while joining
+            preloadMicrophone();
+
             // If we are already in this channel and connected, DO NOTHING (Instant load)
             if (client.connectionState === 'CONNECTED' && currentChannel === channelName) {
                 return;
             }
             
-            // If we are connecting/disconnecting, wait
-            // Since we are in a queue, previous ops should be done. 
-            // However, safe guard:
-            if (client.connectionState === 'CONNECTING' || client.connectionState === 'DISCONNECTING') {
-                 // ideally wait, but queue handles this mostly.
-            }
-
             // Leave previous channel if connected to a different one
             if (client.connectionState === 'CONNECTED') {
                 await client.leave();
@@ -118,15 +127,12 @@ export const joinVoiceChannel = (channelName: string, uid: string | number) => {
     return connectionQueue;
 };
 
-// 2. Switch Mic State (OPTIMIZED FOR QUALITY & RELIABILITY)
+// 2. Switch Mic State (OPTIMIZED FOR SPEED)
 export const switchMicrophoneState = async (shouldPublish: boolean, muted: boolean = false) => {
-    // CRITICAL FIX: Wait for any pending join operations to complete before manipulating mic
-    // This ensures we don't try to publish while 'CONNECTING', which causes silent failures.
+    // Wait for connection to be stable
     await connectionQueue;
 
     if (!client) return;
-    
-    // Prevent overlapping calls
     if (isMicSwitching) return;
     isMicSwitching = true;
 
@@ -134,25 +140,14 @@ export const switchMicrophoneState = async (shouldPublish: boolean, muted: boole
         if (shouldPublish) {
             // --- START TALKING ---
             
-            // 1. Prepare Track (Parallel to DB updates)
+            // 1. Check Preloaded Track
             if (!localAudioTrack) {
                 try {
-                    // Create mic track with optimized settings for Voice Chat
-                    localAudioTrack = await AgoraRTC.createMicrophoneAudioTrack({
-                        // "high_quality" gives 48kHz sampling, good for voice & music
-                        encoderConfig: "high_quality_stereo", 
-                        // Enable aggressive noise suppression and echo cancellation
-                        AEC: true, 
-                        ANS: true,
-                        AGC: true // Auto Gain Control (keeps volume steady)
-                    });
+                    await preloadMicrophone();
                 } catch (micError: any) {
-                    if (micError.name === "NotAllowedError" || micError.code === "PERMISSION_DENIED") {
-                        console.warn("Microphone permission denied by user.");
-                        isMicSwitching = false;
-                        return;
-                    }
-                    throw micError;
+                    console.warn("Microphone permission denied.");
+                    isMicSwitching = false;
+                    return;
                 }
             }
 
@@ -161,17 +156,15 @@ export const switchMicrophoneState = async (shouldPublish: boolean, muted: boole
                 return; 
             }
 
-            // 2. Local Mute (Instant feedback)
-            // Ensure enabled before publishing
+            // 2. Set Mute State Locally (Instant)
+            // Even if publish takes 200ms, the user is "ready"
             await localAudioTrack.setEnabled(!muted);
 
             // 3. Publish (Network op)
-            // Only publish if not already published to avoid errors
             if (client.connectionState === 'CONNECTED') {
                 const tracksToPublish = [localAudioTrack];
                 if (localMusicTrack) tracksToPublish.push(localMusicTrack);
 
-                // Check what's already published
                 const publishedTracks = client.localTracks;
                 const tracksToActuallyPublish = tracksToPublish.filter(t => !publishedTracks.includes(t));
 
@@ -179,13 +172,11 @@ export const switchMicrophoneState = async (shouldPublish: boolean, muted: boole
                     await client.publish(tracksToActuallyPublish);
                     log('✅ Mic Published');
                 }
-            } else {
-                console.warn("⚠️ Cannot publish mic: Client not connected to room.");
             }
         } else {
             // --- STOP TALKING ---
             if (localAudioTrack) {
-                // Mute first to be instant
+                // Just mute and unpublish, don't close track to keep it ready for next time
                 await localAudioTrack.setEnabled(false);
 
                 if (client.connectionState === 'CONNECTED') {
@@ -195,10 +186,6 @@ export const switchMicrophoneState = async (shouldPublish: boolean, muted: boole
                         log('Unpublish warn', e);
                     }
                 }
-                
-                localAudioTrack.stop();
-                localAudioTrack.close();
-                localAudioTrack = null;
                 log('⏹️ Mic Unpublished');
             }
         }
@@ -217,6 +204,7 @@ export const unpublishMicrophone = () => switchMicrophoneState(false);
 export const leaveVoiceChannel = async () => {
     try {
         if (localAudioTrack) {
+            // On full leave, we can close tracks to release hardware
             localAudioTrack.stop();
             localAudioTrack.close();
             localAudioTrack = null;
@@ -260,20 +248,13 @@ export const toggleAllRemoteAudio = (muted: boolean) => {
 
 export const playMusicFile = async (file: File) => {
     if (!client) return;
-    
-    // Stop previous music if any
     await stopMusic();
 
     try {
         localMusicTrack = await AgoraRTC.createBufferSourceAudioTrack({ source: file });
-        
-        // Prepare playback
         localMusicTrack.startProcessAudioBuffer();
-        
-        // Play locally so the host hears it
         localMusicTrack.play();
         
-        // Publish to room so others hear it
         if (client.connectionState === 'CONNECTED') {
             await client.publish(localMusicTrack);
         }
@@ -288,9 +269,7 @@ export const playMusicFile = async (file: File) => {
 export const stopMusic = async () => {
     if (localMusicTrack) {
         if (client && client.connectionState === 'CONNECTED') {
-            try {
-                await client.unpublish(localMusicTrack);
-            } catch (e) { /* ignore */ }
+            try { await client.unpublish(localMusicTrack); } catch (e) { /* ignore */ }
         }
         localMusicTrack.stop();
         localMusicTrack.close();
@@ -298,29 +277,8 @@ export const stopMusic = async () => {
     }
 };
 
-export const pauseMusic = () => {
-    if (localMusicTrack) {
-        localMusicTrack.pauseProcessAudioBuffer();
-    }
-};
-
-export const resumeMusic = () => {
-    if (localMusicTrack) {
-        localMusicTrack.resumeProcessAudioBuffer();
-    }
-};
-
-export const setMusicVolume = (volume: number) => {
-    if (localMusicTrack) {
-        // Volume for local playback and publishing (0 - 100)
-        localMusicTrack.setVolume(volume);
-    }
-};
-
-export const seekMusic = (position: number) => {
-    if (localMusicTrack) {
-        localMusicTrack.seekAudioBuffer(position);
-    }
-};
-
+export const pauseMusic = () => { if (localMusicTrack) localMusicTrack.pauseProcessAudioBuffer(); };
+export const resumeMusic = () => { if (localMusicTrack) localMusicTrack.resumeProcessAudioBuffer(); };
+export const setMusicVolume = (volume: number) => { if (localMusicTrack) localMusicTrack.setVolume(volume); };
+export const seekMusic = (position: number) => { if (localMusicTrack) localMusicTrack.seekAudioBuffer(position); };
 export const getMusicTrack = () => localMusicTrack;

@@ -134,6 +134,7 @@ export interface RoomSeat {
   isMuted: boolean;
   isLocked: boolean;
   giftCount: number;
+  vipLevel?: number; // VIP Level on seat
   adminRole?: 'super_admin' | 'admin' | 'official_manager' | 'me_manager' | null;
 }
 

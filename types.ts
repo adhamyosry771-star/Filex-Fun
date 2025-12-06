@@ -1,3 +1,4 @@
+
 export enum ViewState {
   HOME = 'HOME',
   ROOM = 'ROOM',
@@ -212,11 +213,4 @@ export interface Game {
   name: { ar: string, en: string };
   icon: string;
   bgImage: string;
-}
-
-export interface SavedSong {
-  id: string;
-  name: string;
-  file: Blob; // Storing as Blob since File is not strictly clonable in all contexts, but File extends Blob
-  duration: number;
 }

@@ -11,7 +11,6 @@ import { saveSongToDB, getSongsFromDB, deleteSongFromDB, SavedSong } from '../se
 import UserProfileModal from './UserProfileModal';
 import RoomLeaderboard from './RoomLeaderboard';
 import FullProfileView from './FullProfileView';
-import SvgaOverlay from './SvgaOverlay';
 
 // --- HELPER FUNCTIONS ---
 const getFrameClass = (id?: string | null) => {
@@ -31,7 +30,7 @@ interface SeatItemProps {
 const SeatItem = memo(({ seat, isSpeaking, isLoading, onClick, isHostSeat }: SeatItemProps) => {
     // Determine visuals
     // Host stays w-16 (64px). Regular seats increased from w-12 (48px) to w-[50px] (~4% increase)
-    const sizeClass = isHostSeat ? "w-16 h-16" : "w-[52px] h-[52px]";
+    const sizeClass = isHostSeat ? "w-16 h-16" : "w-[50px] h-[50px]";
     const frameClass = seat.userId ? getFrameClass(seat.frameId) : 'border-2 border-white/20 border-dashed';
     
     // VIP 8 Styling for Name
@@ -136,7 +135,6 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
 
   // Animation State
   const [activeAnimations, setActiveAnimations] = useState<{id: string, icon: string, class: string}[]>([]);
-  const [showEntryEffect, setShowEntryEffect] = useState(false);
 
   // Join Notification State
   const [joinNotification, setJoinNotification] = useState<{name: string, id: string} | null>(null);
@@ -483,14 +481,6 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
              if (latestMsg.isJoin && (!joinNotification || joinNotification.id !== latestMsg.id)) {
                  setJoinNotification({ name: latestMsg.userName, id: latestMsg.id });
                  setTimeout(() => setJoinNotification(null), 3000);
-                 
-                 // SPECIAL EFFECT FOR OFFECAL
-                 // We check the user ID from the message (which is `id`, not `uid` in most message types, but let's check standard)
-                 // Based on implementation of sendMessage, userId is `currentUser.id`.
-                 // If that equals 'OFFECAL', show effect.
-                 if (latestMsg.userId === 'OFFECAL') {
-                     setShowEntryEffect(true);
-                 }
              }
 
              if (latestMsg.isGift && latestMsg.giftType === 'animated' && latestMsg.giftIcon) {
@@ -1136,13 +1126,6 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
         />
         <div className="absolute inset-0 bg-gradient-to-b from-black/60 via-transparent to-black/80 z-0 pointer-events-none"></div>
       </div>
-
-      {showEntryEffect && (
-          <SvgaOverlay 
-              src="/assets/sss.svga" 
-              onComplete={() => setShowEntryEffect(false)} 
-          />
-      )}
 
       {activeAnimations.map(anim => (
           <div key={anim.id} className="absolute inset-0 z-[100] flex items-center justify-center pointer-events-none">

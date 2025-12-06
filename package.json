@@ -14,8 +14,7 @@
     "react-dom": "^19.2.0",
     "lucide-react": "^0.554.0",
     "firebase": "^12.6.0",
-    "agora-rtc-sdk-ng": "4.19.2",
-    "svgaplayerweb": "^2.3.1"
+    "agora-rtc-sdk-ng": "4.19.2"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",

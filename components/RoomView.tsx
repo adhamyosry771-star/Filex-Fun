@@ -904,9 +904,6 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
       setLoadingSeatIndex(index);
       loadingSeatRef.current = index; 
       
-      // Delay connection by 3 seconds as requested
-      await new Promise(resolve => setTimeout(resolve, 3000));
-
       try { 
           await takeSeat(room.id, index, currentUser);
           setTimeout(() => {
@@ -926,25 +923,10 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
 
   const handleToggleLock = async () => {
       if (seatToConfirm !== null && canManageRoom) {
-          const seatIndex = seatToConfirm; // Capture index
-          const seat = seats.find(s => s.index === seatIndex);
+          const seat = seats.find(s => s.index === seatToConfirm);
           if (seat) {
-              const newLockedState = !seat.isLocked;
-              
-              // Optimistic Update
-              setRoom(prev => {
-                  const newSeats = prev.seats.map(s => s.index === seatIndex ? { ...s, isLocked: newLockedState } : s);
-                  return { ...prev, seats: newSeats };
-              });
-              
-              setSeatToConfirm(null); // Close modal immediately
-
-              try {
-                  await toggleSeatLock(room.id, seatIndex, newLockedState);
-              } catch (e) {
-                  // Revert on error (optional but recommended, for now keep it simple as per request for speed)
-                  console.error("Lock failed", e);
-              }
+              await toggleSeatLock(room.id, seatToConfirm, !seat.isLocked);
+              setSeatToConfirm(null);
           }
       }
   };

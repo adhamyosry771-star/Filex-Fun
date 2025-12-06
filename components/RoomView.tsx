@@ -1,9 +1,9 @@
 
 import React, { useState, useEffect, useRef, memo } from 'react';
-import { ArrowLeft, Send, Heart, Share2, Gift as GiftIcon, Users, Crown, Mic, MicOff, Lock, Unlock, Settings, Image as ImageIcon, X, Info, Minimize2, LogOut, BadgeCheck, Loader2, Upload, Shield, Trophy, Bot, Volume2, VolumeX, ArrowDownCircle, Ban, Trash2, UserCog, UserMinus, Zap, BarChart3, Gamepad2, Clock, LayoutGrid, Flag, Music, Play, Pause, SkipForward, SkipBack, Hexagon, ListMusic, Plus, Check, Search, Circle, CheckCircle2, KeyRound } from 'lucide-react';
+import { ArrowLeft, Send, Heart, Share2, Gift as GiftIcon, Users, Crown, Mic, MicOff, Lock, Unlock, Settings, Image as ImageIcon, X, Info, Minimize2, LogOut, BadgeCheck, Loader2, Upload, Shield, Trophy, Bot, Volume2, VolumeX, ArrowDownCircle, Ban, Trash2, UserCog, UserMinus, Zap, BarChart3, Gamepad2, Clock, LayoutGrid, Flag, Music, Play, Pause, SkipForward, SkipBack, Hexagon, ListMusic, Plus, Check, Search, Circle, CheckCircle2, KeyRound, MoreVertical, Grid } from 'lucide-react';
 import { Room, ChatMessage, Gift, Language, User, RoomSeat } from '../types';
 import { GIFTS, STORE_ITEMS, ROOM_BACKGROUNDS, VIP_TIERS, ADMIN_ROLES } from '../constants';
-import { listenToMessages, sendMessage, takeSeat, leaveSeat, updateRoomDetails, sendGiftTransaction, toggleSeatLock, toggleSeatMute, decrementViewerCount, listenToRoom, kickUserFromSeat, banUserFromRoom, unbanUserFromRoom, removeRoomAdmin, addRoomAdmin, searchUserByDisplayId, enterRoom, exitRoom, listenToRoomViewers, getUserProfile } from '../services/firebaseService';
+import { listenToMessages, sendMessage, takeSeat, leaveSeat, updateRoomDetails, sendGiftTransaction, toggleSeatLock, toggleSeatMute, decrementViewerCount, listenToRoom, kickUserFromSeat, banUserFromRoom, unbanUserFromRoom, removeRoomAdmin, addRoomAdmin, searchUserByDisplayId, enterRoom, exitRoom, listenToRoomViewers, getUserProfile, changeRoomSeatCount } from '../services/firebaseService';
 import { joinVoiceChannel, leaveVoiceChannel, toggleMicMute, publishMicrophone, unpublishMicrophone, toggleAllRemoteAudio, listenToVolume, playMusicFile, stopMusic, setMusicVolume, seekMusic, pauseMusic, resumeMusic, getMusicTrack, preloadMicrophone } from '../services/agoraService';
 import { generateAiHostResponse } from '../services/geminiService';
 import { compressImage } from '../services/imageService';
@@ -140,6 +140,7 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
   const [joinNotification, setJoinNotification] = useState<{name: string, id: string} | null>(null);
 
   const [showRoomSettings, setShowRoomSettings] = useState(false);
+  const [showRoomInfoModal, setShowRoomInfoModal] = useState(false); // New Modal for Room Info
   const [showExitModal, setShowExitModal] = useState(false);
   const [showUserList, setShowUserList] = useState(false);
   const [showLeaderboard, setShowLeaderboard] = useState(false);
@@ -278,7 +279,11 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
   const isRoomAdmin = room.admins?.includes(currentUser.uid!);
   const canManageRoom = isHost || isRoomAdmin;
 
-  const seats: RoomSeat[] = Array(11).fill(null).map((_, i) => {
+  // Use the actual number of seats from the room data, default to 11 if not set
+  // This ensures dynamic resizing works visually
+  const totalSeats = room.seats ? room.seats.length : 11;
+  
+  const seats: RoomSeat[] = Array(totalSeats).fill(null).map((_, i) => {
       return (room.seats && room.seats[i]) ? room.seats[i] : { 
           index: i, 
           userId: null, 
@@ -627,7 +632,10 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
       unlockRoom: { ar: 'فتح الروم', en: 'Unlock Room' },
       setPassword: { ar: 'تعيين كلمة مرور للروم', en: 'Set Room Password' },
       passPlaceholder: { ar: '6 أرقام (مثال: 123456)', en: '6 Digits (e.g., 123456)' },
-      confirm: { ar: 'تأكيد', en: 'Confirm' }
+      confirm: { ar: 'تأكيد', en: 'Confirm' },
+      seatsConfig: { ar: 'عدد المايكات', en: 'Number of Seats' },
+      mics10: { ar: '10 مايكات', en: '10 Mics' },
+      mics15: { ar: '15 مايك', en: '15 Mics' }
     };
     return dict[key]?.[language] || key;
   };
@@ -896,6 +904,9 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
       setLoadingSeatIndex(index);
       loadingSeatRef.current = index; 
       
+      // Delay connection by 3 seconds as requested
+      await new Promise(resolve => setTimeout(resolve, 3000));
+
       try { 
           await takeSeat(room.id, index, currentUser);
           setTimeout(() => {
@@ -915,10 +926,25 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
 
   const handleToggleLock = async () => {
       if (seatToConfirm !== null && canManageRoom) {
-          const seat = seats.find(s => s.index === seatToConfirm);
+          const seatIndex = seatToConfirm; // Capture index
+          const seat = seats.find(s => s.index === seatIndex);
           if (seat) {
-              await toggleSeatLock(room.id, seatToConfirm, !seat.isLocked);
-              setSeatToConfirm(null);
+              const newLockedState = !seat.isLocked;
+              
+              // Optimistic Update
+              setRoom(prev => {
+                  const newSeats = prev.seats.map(s => s.index === seatIndex ? { ...s, isLocked: newLockedState } : s);
+                  return { ...prev, seats: newSeats };
+              });
+              
+              setSeatToConfirm(null); // Close modal immediately
+
+              try {
+                  await toggleSeatLock(room.id, seatIndex, newLockedState);
+              } catch (e) {
+                  // Revert on error (optional but recommended, for now keep it simple as per request for speed)
+                  console.error("Lock failed", e);
+              }
           }
       }
   };
@@ -928,6 +954,11 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
   const handleSaveSettings = async () => {
       await updateRoomDetails(room.id, { title: editTitle, description: editDesc, isAiHost: isAiEnabled });
       setShowRoomSettings(false);
+  };
+
+  const handleChangeSeatCount = async (newCount: number) => {
+      if (newCount === room.seatCount) return;
+      await changeRoomSeatCount(room.id, room.seats, newCount);
   };
 
   const handleLeaveRoomAction = () => {
@@ -1136,11 +1167,10 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
       ))}
 
       <div className="relative z-50 pt-safe-top px-3 pb-2 flex items-center justify-between gap-2 bg-gradient-to-b from-black/80 to-transparent w-full shrink-0 h-[60px]">
-        <div className="flex items-center gap-2 min-w-0 flex-1">
-            <button onClick={() => setShowExitModal(true)} className="shrink-0 p-2 bg-white/10 rounded-full hover:bg-white/20 backdrop-blur border border-white/5">
-                <ArrowLeft className="w-5 h-5 rtl:rotate-180 text-white" />
-            </button>
-            <div className="flex items-center gap-2 bg-black/30 backdrop-blur px-2 py-1 rounded-xl border border-white/10 min-w-0 max-w-full">
+        
+        {/* RIGHT SIDE (Start in RTL) - Room Info */}
+        <div className="flex items-center gap-2 min-w-0 flex-1 overflow-hidden">
+            <div onClick={() => setShowRoomInfoModal(true)} className="flex items-center gap-2 bg-black/30 backdrop-blur px-2 py-1 rounded-xl border border-white/10 min-w-0 max-w-full cursor-pointer hover:bg-black/40 transition active:scale-95">
                 <img src={room.thumbnail} className="w-8 h-8 rounded-lg object-cover" />
                 <div className="text-white drop-shadow-md pr-1 min-w-0 flex flex-col justify-center">
                     <div className="flex items-center gap-1">
@@ -1152,10 +1182,20 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
                 </div>
             </div>
         </div>
+
+        {/* LEFT SIDE (End in RTL) - Users + Menu */}
         <div className="flex gap-1.5 shrink-0 items-center">
-            {canManageRoom && <button onClick={() => setShowRoomSettings(true)} className="p-1.5 bg-white/10 rounded-full text-white"><Settings className="w-4 h-4" /></button>}
-            <button onClick={() => setShowUserList(true)} className="bg-white/10 backdrop-blur px-2 py-1.5 rounded-full text-[10px] font-bold text-white flex items-center gap-1"><Users className="w-3 h-3" /> {viewers.length}</button>
+            {/* Users Count */}
+            <button onClick={() => setShowUserList(true)} className="bg-white/10 backdrop-blur px-2 py-1.5 rounded-full text-[10px] font-bold text-white flex items-center gap-1">
+                <Users className="w-3 h-3" /> {viewers.length}
+            </button>
+            
+            {/* 3 Dots Menu (Exit/Minimize) */}
+            <button onClick={() => setShowExitModal(true)} className="p-2 bg-white/10 rounded-full hover:bg-white/20 backdrop-blur border border-white/5 text-white">
+                <MoreVertical className="w-5 h-5" />
+            </button>
         </div>
+
       </div>
 
       <button 
@@ -1340,6 +1380,68 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
                           <div className="p-3 bg-orange-600/20 text-orange-400 rounded-2xl group-hover:bg-orange-600/30 transition"><Flag className="w-6 h-6"/></div>
                           <span className="text-xs text-gray-300 font-medium">{t('report')}</span>
                       </div>
+                  </div>
+              </div>
+          </div>
+      )}
+
+      {/* Full Page Room Info Modal */}
+      {showRoomInfoModal && (
+          <div className="absolute inset-0 z-[80] flex flex-col bg-gray-900/95 backdrop-blur-xl animate-in slide-in-from-bottom-10">
+              {/* Header */}
+              <div className="p-4 flex items-center justify-between">
+                  <button onClick={() => setShowRoomInfoModal(false)} className="p-2 rounded-full hover:bg-white/10 text-white">
+                      <X className="w-6 h-6" />
+                  </button>
+                  {canManageRoom && (
+                      <button 
+                          onClick={() => {
+                              setShowRoomInfoModal(false);
+                              setShowRoomSettings(true);
+                          }}
+                          className="p-2 bg-white/10 rounded-full text-white hover:bg-white/20 transition"
+                      >
+                          <Settings className="w-5 h-5" />
+                      </button>
+                  )}
+              </div>
+
+              {/* Content */}
+              <div className="flex-1 overflow-y-auto p-6 flex flex-col items-center">
+                  {/* Room Image */}
+                  <div className="w-32 h-32 rounded-3xl overflow-hidden shadow-2xl border-4 border-white/10 mb-6">
+                      <img src={room.thumbnail} className="w-full h-full object-cover" alt={room.title} />
+                  </div>
+
+                  {/* Title & ID */}
+                  <h1 className="text-2xl font-bold text-white text-center mb-2">{room.title}</h1>
+                  <div className="bg-white/5 px-4 py-1.5 rounded-full text-sm text-gray-300 font-mono mb-8 border border-white/5">
+                      ID: {room.displayId || room.id}
+                  </div>
+
+                  {/* Description Card */}
+                  <div className="w-full bg-white/5 rounded-2xl p-6 border border-white/10">
+                      <h3 className="text-gray-400 text-xs font-bold uppercase tracking-wider mb-4 border-b border-white/5 pb-2">
+                          {t('roomDesc')}
+                      </h3>
+                      <p className="text-white text-sm leading-relaxed whitespace-pre-wrap text-center">
+                          {room.description || t('pinned')}
+                      </p>
+                  </div>
+
+                  {/* Extra Info */}
+                  <div className="mt-8 flex gap-4">
+                       <div className="flex flex-col items-center p-4 bg-white/5 rounded-2xl min-w-[80px]">
+                           <Users className="w-6 h-6 text-brand-400 mb-2"/>
+                           <span className="text-lg font-bold text-white">{viewers.length}</span>
+                           <span className="text-[10px] text-gray-400">Online</span>
+                       </div>
+                       
+                       <div className="flex flex-col items-center p-4 bg-white/5 rounded-2xl min-w-[80px]">
+                           <img src={room.hostAvatar} className="w-6 h-6 rounded-full mb-2 object-cover"/>
+                           <span className="text-xs font-bold text-white max-w-[80px] truncate">{room.hostName}</span>
+                           <span className="text-[10px] text-gray-400">Host</span>
+                       </div>
                   </div>
               </div>
           </div>
@@ -1687,6 +1789,18 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
                                   <button onClick={() => setIsAiEnabled(!isAiEnabled)} className={`w-10 h-6 rounded-full p-1 transition ${isAiEnabled ? 'bg-brand-600' : 'bg-gray-700'}`}><div className={`w-4 h-4 bg-white rounded-full transition-transform ${isAiEnabled ? 'translate-x-4' : 'translate-x-0'}`}></div></button>
                               </div>
                               
+                              {/* Seat Count Toggle */}
+                              <div className="flex items-center justify-between p-3 bg-white/5 rounded-xl border border-white/10">
+                                  <div className="flex items-center gap-2">
+                                      <div className="p-2 bg-blue-500/20 rounded-lg text-blue-400"><Grid className="w-5 h-5"/></div>
+                                      <div><h4 className="text-sm font-bold text-white">{t('seatsConfig')}</h4><p className="text-[10px] text-gray-400">{(room.seatCount || 10) + ' Mics'}</p></div>
+                                  </div>
+                                  <div className="flex gap-1 bg-black/40 p-1 rounded-lg">
+                                      <button onClick={() => handleChangeSeatCount(10)} className={`px-3 py-1.5 rounded text-[10px] font-bold transition ${(!room.seatCount || room.seatCount === 10) ? 'bg-blue-600 text-white' : 'text-gray-400'}`}>10</button>
+                                      <button onClick={() => handleChangeSeatCount(15)} className={`px-3 py-1.5 rounded text-[10px] font-bold transition ${room.seatCount === 15 ? 'bg-blue-600 text-white' : 'text-gray-400'}`}>15</button>
+                                  </div>
+                              </div>
+
                               <div onClick={toggleRoomLock} className={`flex items-center justify-between p-3 rounded-xl border cursor-pointer transition ${room.isLocked ? 'bg-red-500/10 border-red-500/30' : 'bg-white/5 border-white/10 hover:bg-white/10'}`}>
                                   <div className="flex items-center gap-2">
                                       <div className={`p-2 rounded-lg ${room.isLocked ? 'bg-red-500/20 text-red-400' : 'bg-gray-700 text-gray-400'}`}>

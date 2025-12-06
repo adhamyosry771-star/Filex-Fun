@@ -239,7 +239,7 @@ export const resetAllGhostUsers = async () => {
   const roomsSnap = await getDocs(collection(db, 'rooms'));
   const batch = writeBatch(db);
   
-  // Create clean empty seats array
+  // Create clean empty seats array (default 10 seats + 1 host)
   const emptySeats = Array(11).fill(null).map((_, i) => ({ 
       index: i, 
       userId: null, 
@@ -254,9 +254,10 @@ export const resetAllGhostUsers = async () => {
   }));
 
   roomsSnap.docs.forEach(doc => {
-      // Force reset seats and viewer count for every room
+      // Force reset seats and viewer count for every room, resetting to default 10 seats configuration
       batch.update(doc.ref, { 
           seats: emptySeats,
+          seatCount: 10,
           viewerCount: 0
       });
   });
@@ -327,6 +328,8 @@ export const resetAllRoomCups = async () => {
 // --- Rooms ---
 export const createRoom = async (title: string, thumbnail: string, host: User, hostUid: string) => {
     const roomRef = doc(collection(db, 'rooms'));
+    const initialSeatCount = 10;
+    // Total seats = 1 (host) + seatCount
     const newRoom: Room = {
         id: roomRef.id,
         displayId: host.id,
@@ -338,7 +341,8 @@ export const createRoom = async (title: string, thumbnail: string, host: User, h
         thumbnail,
         tags: [],
         isAiHost: false,
-        seats: Array(11).fill(null).map((_, i) => ({ 
+        seatCount: initialSeatCount,
+        seats: Array(initialSeatCount + 1).fill(null).map((_, i) => ({ 
             index: i, 
             userId: null, 
             userName: null, 
@@ -363,6 +367,41 @@ export const createRoom = async (title: string, thumbnail: string, host: User, h
     };
     await setDoc(roomRef, newRoom);
     return newRoom;
+};
+
+export const changeRoomSeatCount = async (roomId: string, currentSeats: RoomSeat[], newCount: number) => {
+    const roomRef = doc(db, 'rooms', roomId);
+    // newCount is the number of audience seats (e.g., 10 or 15)
+    // total array size = newCount + 1 (Host is index 0)
+    const totalSize = newCount + 1;
+    
+    let newSeats = [...currentSeats];
+
+    if (totalSize > currentSeats.length) {
+        // Grow: Add new empty seats
+        for (let i = currentSeats.length; i < totalSize; i++) {
+            newSeats.push({
+                index: i,
+                userId: null,
+                userName: null,
+                userAvatar: null,
+                isMuted: false,
+                isLocked: false,
+                giftCount: 0,
+                frameId: null,
+                vipLevel: 0,
+                adminRole: null
+            });
+        }
+    } else if (totalSize < currentSeats.length) {
+        // Shrink: Remove seats from the end
+        newSeats = newSeats.slice(0, totalSize);
+    }
+
+    await updateDoc(roomRef, {
+        seatCount: newCount,
+        seats: newSeats
+    });
 };
 
 export const listenToRooms = (callback: (rooms: Room[]) => void): Unsubscribe => {

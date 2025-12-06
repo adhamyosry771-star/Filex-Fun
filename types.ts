@@ -158,7 +158,8 @@ export interface Room {
   backgroundImage?: string; // Inner Background
   tags: string[];
   isAiHost: boolean;
-  seats: RoomSeat[]; 
+  seats: RoomSeat[];
+  seatCount: number; // Number of seats excluding host (e.g., 10 or 15)
   isBanned?: boolean;
   isHot?: boolean;
   isOfficial?: boolean;

@@ -76,6 +76,8 @@ export interface User {
   isPermanentBan?: boolean; // Flag for permanent ban
   isAgent?: boolean;
   agencyBalance?: number;
+  dailyProfit?: number; // Track daily winnings
+  lastDailyReset?: number; // Timestamp for last profit reset
 }
 
 export interface Notification {
@@ -170,6 +172,9 @@ export interface Room {
   cupStartTime?: number; // Timestamp when the current cup started
   bannedUsers?: Record<string, number>; // Map of UserUID -> ExpirationTimestamp (-1 for permanent)
   admins?: string[]; // Array of User IDs (UIDs) who are room admins
+  gameLuck?: number; // 0-100 percentage (General luck)
+  gameMode?: 'FAIR' | 'DRAIN' | 'HOOK'; // New: Algorithm Mode
+  hookThreshold?: number; // New: Amount user can win before DRAIN activates in HOOK mode
 }
 
 export interface Banner {

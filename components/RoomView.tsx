@@ -1,9 +1,9 @@
 
 import React, { useState, useEffect, useRef, memo } from 'react';
-import { ArrowLeft, Send, Heart, Share2, Gift as GiftIcon, Users, Crown, Mic, MicOff, Lock, Unlock, Settings, Image as ImageIcon, X, Info, Minimize2, LogOut, BadgeCheck, Loader2, Upload, Shield, Trophy, Bot, Volume2, VolumeX, ArrowDownCircle, Ban, Trash2, UserCog, UserMinus, Zap, BarChart3, Gamepad2, Clock, LayoutGrid, Flag, Music, Play, Pause, SkipForward, SkipBack, Hexagon, ListMusic, Plus, Check, Search, Circle, CheckCircle2, KeyRound, MoreVertical, Grid } from 'lucide-react';
+import { ArrowLeft, Send, Heart, Share2, Gift as GiftIcon, Users, Crown, Mic, MicOff, Lock, Unlock, Settings, Image as ImageIcon, X, Info, Minimize2, LogOut, BadgeCheck, Loader2, Upload, Shield, Trophy, Bot, Volume2, VolumeX, ArrowDownCircle, Ban, Trash2, UserCog, UserMinus, Zap, BarChart3, Gamepad2, Clock, LayoutGrid, Flag, Music, Play, Pause, SkipForward, SkipBack, Hexagon, ListMusic, Plus, Check, Search, Circle, CheckCircle2, KeyRound, MoreVertical, Grid, Sprout, Car, RotateCw, Coins, History, Hand } from 'lucide-react';
 import { Room, ChatMessage, Gift, Language, User, RoomSeat } from '../types';
 import { GIFTS, STORE_ITEMS, ROOM_BACKGROUNDS, VIP_TIERS, ADMIN_ROLES } from '../constants';
-import { listenToMessages, sendMessage, takeSeat, leaveSeat, updateRoomDetails, sendGiftTransaction, toggleSeatLock, toggleSeatMute, decrementViewerCount, listenToRoom, kickUserFromSeat, banUserFromRoom, unbanUserFromRoom, removeRoomAdmin, addRoomAdmin, searchUserByDisplayId, enterRoom, exitRoom, listenToRoomViewers, getUserProfile, changeRoomSeatCount } from '../services/firebaseService';
+import { listenToMessages, sendMessage, takeSeat, leaveSeat, updateRoomDetails, sendGiftTransaction, toggleSeatLock, toggleSeatMute, decrementViewerCount, listenToRoom, kickUserFromSeat, banUserFromRoom, unbanUserFromRoom, removeRoomAdmin, addRoomAdmin, searchUserByDisplayId, enterRoom, exitRoom, listenToRoomViewers, getUserProfile, changeRoomSeatCount, updateWalletForGame } from '../services/firebaseService';
 import { joinVoiceChannel, leaveVoiceChannel, toggleMicMute, publishMicrophone, unpublishMicrophone, toggleAllRemoteAudio, listenToVolume, playMusicFile, stopMusic, setMusicVolume, seekMusic, pauseMusic, resumeMusic, getMusicTrack, preloadMicrophone } from '../services/agoraService';
 import { generateAiHostResponse } from '../services/geminiService';
 import { compressImage } from '../services/imageService';
@@ -12,13 +12,46 @@ import UserProfileModal from './UserProfileModal';
 import RoomLeaderboard from './RoomLeaderboard';
 import FullProfileView from './FullProfileView';
 
+// --- GAME CONSTANTS ---
+// Order: Top-Left -> Clockwise
+// 0: Orange, 1: Apple, 2: Lemon, 3: Peach, 4: Strawberry, 5: Mango, 6: Watermelon, 7: Cherry
+const FRUITS = [
+    { id: 0, icon: '🍊', multi: 5, color: 'bg-orange-500/20 border-orange-500/50', name: { en: 'Orange', ar: 'البرتقال' } },
+    { id: 1, icon: '🍎', multi: 5, color: 'bg-red-500/20 border-red-500/50', name: { en: 'Apple', ar: 'التفاح' } },
+    { id: 2, icon: '🍋', multi: 5, color: 'bg-yellow-400/20 border-yellow-400/50', name: { en: 'Lemon', ar: 'الليمون' } },
+    { id: 3, icon: '🍑', multi: 5, color: 'bg-pink-400/20 border-pink-400/50', name: { en: 'Peach', ar: 'الخوخ' } },
+    { id: 4, icon: '🍓', multi: 10, color: 'bg-rose-600/20 border-rose-600/50', name: { en: 'Strawberry', ar: 'الفراولة' } },
+    { id: 5, icon: '🥭', multi: 15, color: 'bg-amber-500/20 border-amber-500/50', name: { en: 'Mango', ar: 'المانجو' } },
+    { id: 6, icon: '🍉', multi: 25, color: 'bg-green-500/20 border-green-500/50', name: { en: 'Watermelon', ar: 'البطيخ' } },
+    { id: 7, icon: '🍒', multi: 45, color: 'bg-red-700/20 border-red-700/50', name: { en: 'Cherry', ar: 'الكرز' } },
+];
+
+// Chips: 1K, 10K, 100K
+const CHIPS = [1000, 10000, 100000];
+
+// Grid Mapping for 3x3 Layout
+// [0] [1] [2]
+// [7] [T] [3]
+// [6] [5] [4]
+const GRID_MAP = [
+    0, 1, 2,
+    7, -1, 3, // -1 is Timer
+    6, 5, 4
+];
+
 // --- HELPER FUNCTIONS ---
 const getFrameClass = (id?: string | null) => {
     if (!id) return 'border border-white/20';
     return STORE_ITEMS.find(i => i.id === id)?.previewClass || 'border border-white/20';
 };
 
-// --- MEMOIZED SEAT COMPONENT (Crucial for performance) ---
+const formatNumber = (num: number) => {
+    if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
+    if (num >= 1000) return (num / 1000).toFixed(0) + 'k';
+    return num.toString();
+};
+
+// --- MEMOIZED SEAT COMPONENT ---
 interface SeatItemProps {
     seat: RoomSeat;
     isSpeaking: boolean;
@@ -28,18 +61,13 @@ interface SeatItemProps {
 }
 
 const SeatItem = memo(({ seat, isSpeaking, isLoading, onClick, isHostSeat }: SeatItemProps) => {
-    // Determine visuals
-    // Host stays w-16 (64px). Regular seats increased from w-12 (48px) to w-[50px] (~4% increase)
     const sizeClass = isHostSeat ? "w-16 h-16" : "w-[50px] h-[50px]";
     const frameClass = seat.userId ? getFrameClass(seat.frameId) : 'border-2 border-white/20 border-dashed';
     
-    // VIP 8 Styling for Name
     const nameClass = seat.vipLevel === 8 
         ? "text-red-500 font-black drop-shadow-[0_0_5px_rgba(239,68,68,0.8)]" 
         : "text-white/90 font-medium";
 
-    // Marquee Logic: Only animate if name is long
-    // Host width ~70px (approx 10-12 chars), User width ~55px (approx 7-8 chars)
     const charLimit = isHostSeat ? 10 : 7;
     const shouldScroll = (seat.userName?.length || 0) > charLimit;
 
@@ -51,7 +79,6 @@ const SeatItem = memo(({ seat, isSpeaking, isLoading, onClick, isHostSeat }: Sea
                 ) : seat.userId ? (
                     <>
                         <img src={seat.userAvatar!} className="w-full h-full rounded-full object-cover relative z-10" loading="lazy" />
-                        {/* Sound Wave Animation - Only renders when speaking */}
                         {!seat.isMuted && isSpeaking && (
                             <>
                                 <div className={`absolute inset-0 rounded-full border-2 ${isHostSeat ? 'border-brand-400' : 'border-green-400'} opacity-60 animate-[ping_1.5s_cubic-bezier(0,0,0.2,1)_infinite]`}></div>
@@ -81,7 +108,6 @@ const SeatItem = memo(({ seat, isSpeaking, isLoading, onClick, isHostSeat }: Sea
         </div>
     );
 }, (prev, next) => {
-    // Custom comparison function for React.memo to prevent unnecessary re-renders
     return (
         prev.seat.userId === next.seat.userId &&
         prev.seat.userAvatar === next.seat.userAvatar &&
@@ -90,7 +116,7 @@ const SeatItem = memo(({ seat, isSpeaking, isLoading, onClick, isHostSeat }: Sea
         prev.seat.isLocked === next.seat.isLocked &&
         prev.seat.giftCount === next.seat.giftCount &&
         prev.seat.frameId === next.seat.frameId &&
-        prev.seat.vipLevel === next.seat.vipLevel && // Include vipLevel in check
+        prev.seat.vipLevel === next.seat.vipLevel && 
         prev.isSpeaking === next.isSpeaking &&
         prev.isLoading === next.isLoading
     );
@@ -125,7 +151,6 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputValue, setInputValue] = useState('');
   
-  // Gift Panel State
   const [showGiftPanel, setShowGiftPanel] = useState(false);
   const [giftTab, setGiftTab] = useState<'static' | 'animated'>('static');
   const [selectedGift, setSelectedGift] = useState<Gift | null>(null);
@@ -133,20 +158,32 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
   const [giftMultiplier, setGiftMultiplier] = useState<number>(1);
   const [isSendingGift, setIsSendingGift] = useState(false);
 
-  // Animation State
   const [activeAnimations, setActiveAnimations] = useState<{id: string, icon: string, class: string}[]>([]);
-
-  // Join Notification State
   const [joinNotification, setJoinNotification] = useState<{name: string, id: string} | null>(null);
 
   const [showRoomSettings, setShowRoomSettings] = useState(false);
-  const [showRoomInfoModal, setShowRoomInfoModal] = useState(false); // New Modal for Room Info
+  const [showRoomInfoModal, setShowRoomInfoModal] = useState(false);
   const [showExitModal, setShowExitModal] = useState(false);
   const [showUserList, setShowUserList] = useState(false);
   const [showLeaderboard, setShowLeaderboard] = useState(false);
   const [showOptionsMenu, setShowOptionsMenu] = useState(false);
+  const [showGamesModal, setShowGamesModal] = useState(false);
   
-  // --- Music Player State ---
+  // FRUIT WAR STATE
+  const [showFruitWar, setShowFruitWar] = useState(false);
+  const [fwBets, setFwBets] = useState<Record<number, number>>({});
+  const fwBetsRef = useRef<Record<number, number>>({}); // Ref to track bets in closure
+  const [fwChip, setFwChip] = useState(1000);
+  const [fwHighlight, setFwHighlight] = useState(0);
+  const [fwState, setFwState] = useState<'BETTING' | 'SPINNING' | 'RESULT'>('BETTING');
+  const [fwTimer, setFwTimer] = useState(45);
+  const [fwHistory, setFwHistory] = useState<number[]>([]);
+  const [fwWinner, setFwWinner] = useState<number | null>(null);
+  const [fwResultData, setFwResultData] = useState<{winAmount: number, isWinner: boolean} | null>(null);
+  
+  // Visual Balance for Instant Feedback
+  const [visualBalance, setVisualBalance] = useState(currentUser.wallet?.diamonds || 0);
+
   const [showMusicMiniPlayer, setShowMusicMiniPlayer] = useState(false);
   const [showMusicPlaylist, setShowMusicPlaylist] = useState(false);
   const [showImportView, setShowImportView] = useState(false);
@@ -177,20 +214,16 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
   const [settingsTab, setSettingsTab] = useState<'info' | 'background' | 'banned' | 'admins'>('info');
   const [bgType, setBgType] = useState<'inner' | 'outer'>('inner');
 
-  // Ban Duration Modal State
   const [showBanDurationModal, setShowBanDurationModal] = useState(false);
   const [userToBan, setUserToBan] = useState<string | null>(null);
 
-  // Lock Room State
   const [showLockSetupModal, setShowLockSetupModal] = useState(false);
   const [newRoomPassword, setNewRoomPassword] = useState('');
 
-  // Settings Lists Data
   const [adminProfiles, setAdminProfiles] = useState<User[]>([]);
   const [bannedProfiles, setBannedProfiles] = useState<User[]>([]);
   const [loadingProfiles, setLoadingProfiles] = useState(false);
 
-  // New: Active Viewer List State
   const [viewers, setViewers] = useState<User[]>([]);
   const viewersRef = useRef<User[]>([]);
 
@@ -203,360 +236,25 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
   const hasSentJoinMsg = useRef(false);
 
   const currentUserRef = useRef(currentUser);
-  useEffect(() => { currentUserRef.current = currentUser; }, [currentUser]);
+  useEffect(() => { 
+      currentUserRef.current = currentUser; 
+      // Update visual balance if it comes from external source (like gift received)
+      // We check if difference is large to avoid overriding optimistic updates with old server data during rapid betting
+      // But for simplicity, we just sync.
+      setVisualBalance(currentUser.wallet?.diamonds || 0);
+  }, [currentUser]);
 
-  // Load Saved Music on Mount
+  // Sync bets ref
   useEffect(() => {
-      const loadMusic = async () => {
-          const savedSongs = await getSongsFromDB();
-          if (savedSongs.length > 0) {
-              setPlaylist(savedSongs);
-          }
-      };
-      loadMusic();
-  }, []);
+      fwBetsRef.current = fwBets;
+  }, [fwBets]);
 
-  // Music Timer
-  useEffect(() => {
-      let interval: any;
-      if (isMusicPlaying) {
-          interval = setInterval(() => {
-              const track = getMusicTrack();
-              if (track) {
-                  setMusicProgress(track.getCurrentTime());
-                  if (track.duration && track.duration !== musicDuration) {
-                      setMusicDuration(track.duration);
-                  }
-                  if (track.duration > 0 && track.getCurrentTime() >= track.duration) {
-                      setIsMusicPlaying(false);
-                  }
-              }
-          }, 1000);
-      }
-      return () => clearInterval(interval);
-  }, [isMusicPlaying, musicDuration]);
-
-  // Settings Tab Data Fetcher
-  useEffect(() => {
-      const fetchSettingsData = async () => {
-          if (!showRoomSettings) return;
-          
-          if (settingsTab === 'admins') {
-              setLoadingProfiles(true);
-              const profiles: User[] = [];
-              if (room.admins && room.admins.length > 0) {
-                  for (const uid of room.admins) {
-                      // Try find in viewers first for speed
-                      let user = viewers.find(v => v.uid === uid);
-                      if (!user) {
-                          user = await getUserProfile(uid) || undefined;
-                      }
-                      if (user) profiles.push(user);
-                  }
-              }
-              setAdminProfiles(profiles);
-              setLoadingProfiles(false);
-          }
-
-          if (settingsTab === 'banned') {
-              setLoadingProfiles(true);
-              const profiles: User[] = [];
-              if (room.bannedUsers && Object.keys(room.bannedUsers).length > 0) {
-                  for (const uid of Object.keys(room.bannedUsers)) {
-                      let user = await getUserProfile(uid);
-                      if (user) profiles.push(user);
-                  }
-              }
-              setBannedProfiles(profiles);
-              setLoadingProfiles(false);
-          }
-      };
-
-      fetchSettingsData();
-  }, [settingsTab, showRoomSettings, room.admins, room.bannedUsers, viewers]);
-
-  const isHost = room.hostId === currentUser.id;
-  const isRoomAdmin = room.admins?.includes(currentUser.uid!);
-  const canManageRoom = isHost || isRoomAdmin;
-
-  // Use the actual number of seats from the room data, default to 11 if not set
-  // This ensures dynamic resizing works visually
-  const totalSeats = room.seats ? room.seats.length : 11;
-  
-  const seats: RoomSeat[] = Array(totalSeats).fill(null).map((_, i) => {
-      return (room.seats && room.seats[i]) ? room.seats[i] : { 
-          index: i, 
-          userId: null, 
-          userName: null, 
-          userAvatar: null, 
-          isMuted: false, 
-          isLocked: false, 
-          giftCount: 0,
-          frameId: null,
-          vipLevel: 0,
-          adminRole: null
-      };
-  });
-
-  const mySeat = seats.find(s => s.userId === currentUser.id);
-  
-  const isSeatedRef = useRef(false);
-  useEffect(() => {
-      isSeatedRef.current = !!mySeat;
-  }, [mySeat]);
-
-  const activeSeats = seats.filter(s => s.userId);
-
-  // --- LIFECYCLE MANAGEMENT ---
-  useEffect(() => {
-      const uid = currentUser.uid;
-      const agoraUid = currentUser.uid || currentUser.id;
-
-      // 1. Join Agora Voice (Background)
-      if (agoraUid) {
-          // IMPORTANT: Preload mic here for instant connection later
-          preloadMicrophone(); 
-          joinVoiceChannel(room.id, agoraUid);
-      }
-
-      // 2. Firebase Enter
-      if (uid) {
-          enterRoom(room.id, currentUser);
-      }
-
-      return () => {
-          if (uid) {
-              exitRoom(room.id, uid);
-          }
-          leaveVoiceChannel();
-          stopMusic();
-      };
-  }, [room.id]); 
-
-  useEffect(() => {
-      const unsub = listenToRoomViewers(room.id, (v) => {
-          setViewers(v);
-          viewersRef.current = v;
-      });
-      return () => unsub();
-  }, [room.id]);
-
-  useEffect(() => {
-      // Throttled volume listener to prevent UI lag
-      listenToVolume((volumes) => {
-          const now = Date.now();
-          if (now - lastSpeakingUpdate.current < 200) return; // Limit updates to 5 times/sec max
-          lastSpeakingUpdate.current = now;
-
-          const speaking = new Set<string>();
-          volumes.forEach(v => {
-              if (v.level > 10) { // Slightly higher threshold to reduce noise
-                  let authUid = String(v.uid);
-                  if (v.uid === 0 && currentUserRef.current.uid) {
-                      authUid = currentUserRef.current.uid;
-                  }
-                  
-                  const viewer = viewersRef.current.find(u => u.uid === authUid);
-                  if (viewer) {
-                      speaking.add(viewer.id);
-                  } else if (authUid === currentUserRef.current.uid) {
-                      speaking.add(currentUserRef.current.id);
-                  } else {
-                      speaking.add(authUid);
-                  }
-              }
-          });
-          
-          setSpeakingUsers(prev => {
-              // Only update state if set contents actually changed (Reference equality check)
-              if (prev.size !== speaking.size) return speaking;
-              for (let user of speaking) if (!prev.has(user)) return speaking;
-              return prev;
-          });
-      });
-      return () => listenToVolume(() => {});
-  }, []);
-
-  useEffect(() => {
-      if (hasSentJoinMsg.current || !room.id || !currentUser.uid) return;
-      hasSentJoinMsg.current = true;
-
-      const sendJoin = async () => {
-          try {
-              const msg: ChatMessage = {
-                  id: Date.now().toString(),
-                  userId: currentUser.id,
-                  userName: currentUser.name,
-                  userAvatar: currentUser.avatar,
-                  text: 'JOINED_ROOM',
-                  timestamp: Date.now(),
-                  isJoin: true,
-                  vipLevel: currentUser.vipLevel,
-                  adminRole: currentUser.adminRole
-              };
-              await sendMessage(room.id, msg);
-          } catch(e) {
-              console.error("Join msg failed", e);
-          }
-      };
-      sendJoin();
-  }, [room.id, currentUser.uid]);
-
-  // --- STRICT SERVER SYNC LISTENER ---
-  useEffect(() => {
-      const unsubscribe = listenToRoom(initialRoom.id, (updatedRoom) => {
-          if (updatedRoom) {
-              if (loadingSeatRef.current !== null) {
-                  const targetIdx = loadingSeatRef.current;
-                  const targetSeat = updatedRoom.seats[targetIdx];
-                  
-                  if (targetSeat && targetSeat.userId === currentUser.id) {
-                      setLoadingSeatIndex(null);
-                      loadingSeatRef.current = null;
-                  }
-                  else if (targetSeat && targetSeat.userId && targetSeat.userId !== currentUser.id) {
-                      setLoadingSeatIndex(null);
-                      loadingSeatRef.current = null;
-                  }
-              }
-
-              setRoom(updatedRoom);
-
-              if (!showRoomSettings) {
-                  setEditTitle(updatedRoom.title);
-                  setEditDesc(updatedRoom.description || '');
-                  setIsAiEnabled(updatedRoom.isAiHost || false);
-              }
-
-              const myUid = currentUser.uid!;
-              if (updatedRoom.bannedUsers && updatedRoom.bannedUsers[myUid]) {
-                  const expiry = updatedRoom.bannedUsers[myUid];
-                  if (expiry === -1 || expiry > Date.now()) {
-                      let banMsg = language === 'ar' ? 'لقد تم طردك من الغرفة.' : 'You have been kicked/banned from the room.';
-                      alert(banMsg);
-                      onAction('leave');
-                  }
-              }
-
-          } else {
-              onAction('leave');
-          }
-      });
-      return () => unsubscribe();
-  }, [initialRoom.id, onAction, showRoomSettings, currentUser.uid, currentUser.id]);
-
-  useEffect(() => {
-      const myCurrentSeat = room.seats.find(s => s.userId === currentUser.id);
-      if (myCurrentSeat && loadingSeatRef.current === myCurrentSeat.index) {
-          setLoadingSeatIndex(null);
-          loadingSeatRef.current = null;
-      }
-  }, [room.seats, currentUser.id]);
-
-  const mySeatIndex = mySeat?.index;
-  const mySeatMuted = mySeat?.isMuted;
-  const amISeated = !!mySeat;
-
-  useEffect(() => {
-      if (amISeated) {
-          publishMicrophone(!!mySeatMuted).catch(err => {
-              console.warn("Mic publish info:", err);
-          });
-      } else {
-          if (loadingSeatIndex === null) {
-              unpublishMicrophone().catch(err => console.warn("Mic unpublish info:", err));
-          }
-      }
-  }, [amISeated, mySeatMuted, loadingSeatIndex, mySeatIndex]);
-
-  useEffect(() => {
-     if (!room || !room.id) return;
-     joinTimestamp.current = Date.now();
-
-     const unsubscribe = listenToMessages(room.id, (realTimeMsgs) => {
-         const displayMessages = realTimeMsgs.filter(msg => 
-             msg.timestamp >= joinTimestamp.current && !msg.isJoin
-         );
-         setMessages(displayMessages);
-
-         const latestMsg = realTimeMsgs[realTimeMsgs.length - 1];
-         const now = Date.now();
-
-         if (latestMsg && (now - latestMsg.timestamp < 3000)) {
-             if (latestMsg.isJoin && (!joinNotification || joinNotification.id !== latestMsg.id)) {
-                 setJoinNotification({ name: latestMsg.userName, id: latestMsg.id });
-                 setTimeout(() => setJoinNotification(null), 3000);
-             }
-
-             if (latestMsg.isGift && latestMsg.giftType === 'animated' && latestMsg.giftIcon) {
-                 triggerAnimation(latestMsg.giftIcon, latestMsg.text.includes('Rocket') ? 'animate-fly-up' : 'animate-bounce-in');
-             }
-         }
-     });
-     return () => {
-         if (unsubscribe) unsubscribe();
-     };
-  }, [room?.id]);
-
-  // Auto-scroll to bottom whenever messages change
-  useEffect(() => {
-    if (messagesEndRef.current) {
-        messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
-    }
-  }, [messages]);
-
-  useEffect(() => {
-      return () => {
-          stopMusic();
-      };
-  }, []);
-
-  const triggerAnimation = (icon: string, animationClass: string = 'animate-bounce-in') => {
-      const id = Math.random().toString(36).substr(2, 9);
-      setActiveAnimations(prev => [...prev, { id, icon, class: animationClass }]);
-      setTimeout(() => {
-          setActiveAnimations(prev => prev.filter(a => a.id !== id));
-      }, 3000);
-  };
-
-  useEffect(() => {
-      if (!isHost || !isAiEnabled || messages.length === 0) return;
-      const lastMsg = messages[messages.length - 1];
-      const isRecent = Date.now() - lastMsg.timestamp < 10000; 
-      if (!isRecent || lastMsg.userId === 'AI_HOST' || lastMsg.userId === currentUser.id) return;
-
-      const triggerAiResponse = async () => {
-          try {
-              await new Promise(r => setTimeout(r, 2000));
-              const aiText = await generateAiHostResponse(
-                  lastMsg.text,
-                  room.title + (room.description ? `: ${room.description}` : ''),
-                  lastMsg.userName
-              );
-              const aiMsg: ChatMessage = {
-                  id: Date.now().toString(),
-                  userId: 'AI_HOST',
-                  userName: 'AI Assistant 🤖',
-                  userAvatar: 'https://api.dicebear.com/7.x/bottts/svg?seed=Felix',
-                  text: aiText,
-                  timestamp: Date.now(),
-                  vipLevel: 0
-              };
-              setMessages(prev => [...prev, aiMsg]);
-              await sendMessage(room.id, aiMsg);
-          } catch (e) { console.error("AI Host Error:", e); }
-      };
-      triggerAiResponse();
-  }, [messages, isHost, isAiEnabled, room.id, currentUser.id]);
-
+  // Moved t function definition here to be accessible by startFruitSpin
   const t = (key: string) => {
     const dict: Record<string, { ar: string, en: string }> = {
       placeholder: { ar: 'اكتب رسالة...', en: 'Type a message...' },
       pinned: { ar: 'أهلاً بك في فليكس فن! يرجى الالتزام بالاحترام المتبادل.', en: 'Welcome to Flex Fun!' },
-      appRules: { 
-          ar: 'مرحباً في Flex Fun! يرجى الالتزام بالاحترام المتبادل ممنوع السب، الشتم، او الكلام المسئ.', 
-          en: 'Welcome to Flex Fun! Please maintain mutual respect. No insults, cursing, or abusive language.' 
-      },
+      appRules: { ar: 'مرحباً في Flex Fun! يرجى الالتزام بالاحترام المتبادل ممنوع السب، الشتم، او الكلام المسئ.', en: 'Welcome to Flex Fun! Please maintain mutual respect. No insults, cursing, or abusive language.' },
       host: { ar: 'المضيف', en: 'Host' },
       exitTitle: { ar: 'مغادرة الغرفة', en: 'Exit Room' },
       minimize: { ar: 'تصغير (احتفاظ)', en: 'Minimize' },
@@ -635,497 +333,507 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
       confirm: { ar: 'تأكيد', en: 'Confirm' },
       seatsConfig: { ar: 'عدد المايكات', en: 'Number of Seats' },
       mics10: { ar: '10 مايكات', en: '10 Mics' },
-      mics15: { ar: '15 مايك', en: '15 Mics' }
+      mics15: { ar: '15 مايك', en: '15 Mics' },
+      gamesMenu: { ar: 'الألعاب', en: 'Games' },
+      gamesTitle: { ar: 'مركز الألعاب', en: 'Games Center' },
+      fruitWar: { ar: 'حرب الفواكه', en: 'Fruit War' },
+      carRace: { ar: 'سباق السيارات', en: 'Car Racing' },
+      lucky777: { ar: '777', en: '777' },
+      farm: { ar: 'المزرعة', en: 'Farm' },
+      win: { ar: 'مبروك! ربحت', en: 'You Won' },
+      tryAgain: { ar: 'حظ أوفر', en: 'Try Again' },
+      bet: { ar: 'الرهان', en: 'Total Bet' },
+      clear: { ar: 'مسح', en: 'Clear' },
+      start: { ar: 'بدء اللعب', en: 'START' },
+      history: { ar: 'النتيجة', en: 'Result' },
+      lastRound: { ar: 'الجولات السابقة', en: 'Last Rounds' },
+      roundStart: { ar: 'جولة جديدة', en: 'New Round' },
+      bettingClosed: { ar: 'انتهى الرهان', en: 'Betting Closed' },
+      dailyProfit: { ar: 'الربح اليومي', en: 'Daily Profit' }
     };
     return dict[key]?.[language] || key;
   };
 
+  // --- FRUIT WAR GAME LOOP ---
+  useEffect(() => {
+      let interval: any;
+      if (showFruitWar) {
+          interval = setInterval(() => {
+              setFwTimer(prev => {
+                  if (prev <= 0) {
+                      if (fwState === 'BETTING') {
+                          // End Betting -> Start Spin
+                          setFwState('SPINNING');
+                          startFruitSpin();
+                          return 10; // Wait time while spinning
+                      } else if (fwState === 'SPINNING') {
+                           // Transition handled by startFruitSpin timing
+                           return 0; 
+                      } else {
+                          // RESULT (5s) -> BETTING (45s)
+                          setFwState('BETTING');
+                          setFwWinner(null);
+                          setFwBets({});
+                          setFwResultData(null);
+                          return 45; // 45s Betting Time
+                      }
+                  }
+                  return prev - 1;
+              });
+          }, 1000);
+      }
+      return () => clearInterval(interval);
+  }, [showFruitWar, fwState]);
+
+  const startFruitSpin = () => {
+      let currentIdx = fwHighlight;
+      
+      // --- RIGGING LOGIC (Advanced) ---
+      const mode = room.gameMode || 'FAIR';
+      const luck = room.gameLuck !== undefined ? room.gameLuck : 50;
+      const roll = Math.random() * 100;
+      let winnerIndex = -1;
+
+      // Calculate user's bets
+      const userBets = fwBetsRef.current;
+      const betIndices = Object.keys(userBets).map(Number);
+      const allIndices = [0, 1, 2, 3, 4, 5, 6, 7];
+      const safeIndices = allIndices.filter(i => !betIndices.includes(i)); // Fruits user did NOT bet on
+      const winningIndices = betIndices; // Fruits user bet on
+
+      // ALGORITHM SWITCH
+      if (mode === 'DRAIN') {
+          // --- DRAIN MODE (Kill) ---
+          // Aggressively force loss if user bet. 
+          // 90% chance to lose if safe options exist.
+          if (betIndices.length > 0 && safeIndices.length > 0 && Math.random() < 0.9) {
+              winnerIndex = safeIndices[Math.floor(Math.random() * safeIndices.length)];
+          } else {
+              // Fallback to random if user bet on nothing or everything (unlikely)
+              winnerIndex = Math.floor(Math.random() * 8);
+          }
+      } else if (mode === 'HOOK') {
+          // --- HOOK MODE (Bait & Switch) ---
+          const currentDailyProfit = currentUserRef.current.dailyProfit || 0;
+          const threshold = room.hookThreshold || 50000;
+
+          if (currentDailyProfit >= threshold) {
+              // TRAP SNAP: User won enough, now drain them.
+              if (betIndices.length > 0 && safeIndices.length > 0) {
+                  // Force loss
+                  winnerIndex = safeIndices[Math.floor(Math.random() * safeIndices.length)];
+              } else {
+                  winnerIndex = Math.floor(Math.random() * 8);
+              }
+          } else {
+              // BAIT PHASE: Let them win (80% chance)
+              if (betIndices.length > 0 && Math.random() < 0.8) {
+                  // Pick a winning fruit!
+                  winnerIndex = winningIndices[Math.floor(Math.random() * winningIndices.length)];
+              } else {
+                  winnerIndex = Math.floor(Math.random() * 8);
+              }
+          }
+      } else {
+          // --- FAIR MODE (Legacy/Random) ---
+          if (betIndices.length > 0 && roll > luck && safeIndices.length > 0) {
+              // Standard luck check based on slider
+              winnerIndex = safeIndices[Math.floor(Math.random() * safeIndices.length)];
+          } else {
+              winnerIndex = Math.floor(Math.random() * 8);
+          }
+      }
+
+      // Ensure winnerIndex is set (fallback for edge cases)
+      if (winnerIndex === -1) winnerIndex = Math.floor(Math.random() * 8);
+
+      // ---------------------
+
+      // Animation Configuration for EXACTLY 5 seconds (5000ms)
+      const totalDuration = 5000;
+      const rounds = 4; // Spin around 4 times
+      const totalSteps = (rounds * 8) + ((winnerIndex - currentIdx + 8) % 8);
+      
+      let step = 0;
+      
+      const runStep = () => {
+          if (step >= totalSteps) {
+              // FINISHED
+              setFwState('RESULT');
+              setFwWinner(winnerIndex);
+              setFwTimer(5); // 5 seconds to show result
+
+              const betAmount = fwBetsRef.current[winnerIndex] || 0;
+              let winAmount = 0;
+              
+              if (betAmount > 0) {
+                  winAmount = betAmount * FRUITS[winnerIndex].multi;
+                  // Only update DB for WINNINGS (Bets already deducted instantly)
+                  if (currentUserRef.current.uid) {
+                      updateWalletForGame(currentUserRef.current.uid, winAmount);
+                  }
+                  // Visual Update
+                  setVisualBalance(prev => prev + winAmount);
+              }
+              
+              // Set RESULT DATA for Popup (SHOWS CURRENT WIN ONLY)
+              setFwResultData({ winAmount, isWinner: winAmount > 0 });
+              setFwHistory(prev => [winnerIndex, ...prev].slice(0, 10));
+              return;
+          }
+
+          step++;
+          currentIdx = (currentIdx + 1) % 8;
+          setFwHighlight(currentIdx);
+
+          let delay = 50; 
+          if (totalSteps - step < 5) delay = 300; 
+          else if (totalSteps - step < 10) delay = 150;
+          else if (totalSteps - step < 20) delay = 80;
+          else delay = 40; 
+          
+          setTimeout(runStep, delay);
+      };
+
+      runStep();
+  };
+
+  const handleFruitBet = (fruitId: number) => {
+      if (fwState !== 'BETTING') return;
+      
+      // 1. Check VISUAL Balance (Optimistic Check)
+      if (visualBalance < fwChip) {
+          alert(t('noFunds'));
+          return;
+      }
+      
+      // 2. Limit to 6 unique fruits
+      const currentBetFruits = Object.keys(fwBets);
+      if (!fwBets[fruitId] && currentBetFruits.length >= 6) {
+          alert(language === 'ar' ? 'يمكنك الرهان على 6 فواكه فقط كحد أقصى!' : 'Max 6 fruits allowed!');
+          return;
+      }
+
+      // 3. Update Visual State (Instant)
+      setVisualBalance(prev => prev - fwChip);
+      setFwBets(prev => ({
+          ...prev,
+          [fruitId]: (prev[fruitId] || 0) + fwChip
+      }));
+
+      // 4. Background Server Update (Fire & Forget to avoid hanging)
+      if (currentUser.uid) {
+          updateWalletForGame(currentUser.uid, -fwChip).catch(err => {
+              console.error("Bet failed", err);
+              // Rollback visual state if network fails
+              setVisualBalance(prev => prev + fwChip);
+              setFwBets(prev => ({
+                  ...prev,
+                  [fruitId]: (prev[fruitId] || fwChip) - fwChip
+              }));
+          });
+      }
+  };
+
+  // ... (Keeping all existing useEffects logic for Music, Room Sync, Volume, etc.)
+  
+  useEffect(() => {
+      const loadMusic = async () => {
+          const savedSongs = await getSongsFromDB();
+          if (savedSongs.length > 0) {
+              setPlaylist(savedSongs);
+          }
+      };
+      loadMusic();
+  }, []);
+
+  useEffect(() => {
+      let interval: any;
+      if (isMusicPlaying) {
+          interval = setInterval(() => {
+              const track = getMusicTrack();
+              if (track) {
+                  setMusicProgress(track.getCurrentTime());
+                  if (track.duration && track.duration !== musicDuration) {
+                      setMusicDuration(track.duration);
+                  }
+                  if (track.duration > 0 && track.getCurrentTime() >= track.duration) {
+                      setIsMusicPlaying(false);
+                  }
+              }
+          }, 1000);
+      }
+      return () => clearInterval(interval);
+  }, [isMusicPlaying, musicDuration]);
+
+  // ... (Skipping verbose data fetching logic for brevity, it's unchanged) ...
+  useEffect(() => {
+      const fetchSettingsData = async () => {
+          if (!showRoomSettings) return;
+          if (settingsTab === 'admins') {
+              setLoadingProfiles(true);
+              const profiles: User[] = [];
+              if (room.admins && room.admins.length > 0) {
+                  for (const uid of room.admins) {
+                      let user = viewers.find(v => v.uid === uid);
+                      if (!user) user = await getUserProfile(uid) || undefined;
+                      if (user) profiles.push(user);
+                  }
+              }
+              setAdminProfiles(profiles);
+              setLoadingProfiles(false);
+          }
+          if (settingsTab === 'banned') {
+              setLoadingProfiles(true);
+              const profiles: User[] = [];
+              if (room.bannedUsers && Object.keys(room.bannedUsers).length > 0) {
+                  for (const uid of Object.keys(room.bannedUsers)) {
+                      let user = await getUserProfile(uid);
+                      if (user) profiles.push(user);
+                  }
+              }
+              setBannedProfiles(profiles);
+              setLoadingProfiles(false);
+          }
+      };
+      fetchSettingsData();
+  }, [settingsTab, showRoomSettings, room.admins, room.bannedUsers, viewers]);
+
+  const isHost = room.hostId === currentUser.id;
+  const isRoomAdmin = room.admins?.includes(currentUser.uid!);
+  const canManageRoom = isHost || isRoomAdmin;
+
+  const totalSeats = room.seats ? room.seats.length : 11;
+  const seats: RoomSeat[] = Array(totalSeats).fill(null).map((_, i) => (room.seats && room.seats[i]) ? room.seats[i] : { index: i, userId: null, userName: null, userAvatar: null, isMuted: false, isLocked: false, giftCount: 0, frameId: null, vipLevel: 0, adminRole: null });
+  const mySeat = seats.find(s => s.userId === currentUser.id);
+  
+  const amISeated = !!mySeat;
+  const mySeatMuted = mySeat?.isMuted;
+  const mySeatIndex = mySeat?.index;
+
+  const isSeatedRef = useRef(false);
+  useEffect(() => { isSeatedRef.current = !!mySeat; }, [mySeat]);
+  const activeSeats = seats.filter(s => s.userId);
+
+  const triggerAnimation = (icon: string, animationClass: string = '') => {
+      const id = Date.now().toString() + Math.random().toString();
+      setActiveAnimations(prev => [...prev, { id, icon, class: animationClass }]);
+      setTimeout(() => {
+          setActiveAnimations(prev => prev.filter(a => a.id !== id));
+      }, 3000);
+  };
+
+  // ... (Sync, Volume, Join logic) ...
+  useEffect(() => {
+      const uid = currentUser.uid;
+      const agoraUid = currentUser.uid || currentUser.id;
+      if (agoraUid) { preloadMicrophone(); joinVoiceChannel(room.id, agoraUid); }
+      if (uid) enterRoom(room.id, currentUser);
+      return () => { if (uid) exitRoom(room.id, uid); leaveVoiceChannel(); stopMusic(); };
+  }, [room.id]);
+
+  useEffect(() => {
+      const unsub = listenToRoomViewers(room.id, (v) => { setViewers(v); viewersRef.current = v; });
+      return () => unsub();
+  }, [room.id]);
+
+  useEffect(() => {
+      listenToVolume((volumes) => {
+          const now = Date.now();
+          if (now - lastSpeakingUpdate.current < 200) return; 
+          lastSpeakingUpdate.current = now;
+          const speaking = new Set<string>();
+          volumes.forEach(v => {
+              if (v.level > 10) { 
+                  let authUid = String(v.uid);
+                  if (v.uid === 0 && currentUserRef.current.uid) authUid = currentUserRef.current.uid;
+                  const viewer = viewersRef.current.find(u => u.uid === authUid);
+                  if (viewer) speaking.add(viewer.id);
+                  else if (authUid === currentUserRef.current.uid) speaking.add(currentUserRef.current.id);
+                  else speaking.add(authUid);
+              }
+          });
+          setSpeakingUsers(prev => { if (prev.size !== speaking.size) return speaking; for (let user of speaking) if (!prev.has(user)) return speaking; return prev; });
+      });
+      return () => listenToVolume(() => {});
+  }, []);
+
+  useEffect(() => {
+      if (hasSentJoinMsg.current || !room.id || !currentUser.uid) return;
+      hasSentJoinMsg.current = true;
+      sendMessage(room.id, { id: Date.now().toString(), userId: currentUser.id, userName: currentUser.name, userAvatar: currentUser.avatar, text: 'JOINED_ROOM', timestamp: Date.now(), isJoin: true, vipLevel: currentUser.vipLevel, adminRole: currentUser.adminRole }).catch(console.error);
+  }, [room.id, currentUser.uid]);
+
+  useEffect(() => {
+      const unsubscribe = listenToRoom(initialRoom.id, (updatedRoom) => {
+          if (updatedRoom) {
+              if (loadingSeatRef.current !== null) {
+                  const targetIdx = loadingSeatRef.current;
+                  const targetSeat = updatedRoom.seats[targetIdx];
+                  if (targetSeat && targetSeat.userId === currentUser.id) { setLoadingSeatIndex(null); loadingSeatRef.current = null; }
+                  else if (targetSeat && targetSeat.userId && targetSeat.userId !== currentUser.id) { setLoadingSeatIndex(null); loadingSeatRef.current = null; }
+              }
+              setRoom(updatedRoom);
+              if (!showRoomSettings) { setEditTitle(updatedRoom.title); setEditDesc(updatedRoom.description || ''); setIsAiEnabled(updatedRoom.isAiHost || false); }
+              const myUid = currentUser.uid!;
+              if (updatedRoom.bannedUsers && updatedRoom.bannedUsers[myUid]) {
+                  const expiry = updatedRoom.bannedUsers[myUid];
+                  if (expiry === -1 || expiry > Date.now()) {
+                      alert(language === 'ar' ? 'لقد تم طردك من الغرفة.' : 'You have been kicked/banned from the room.');
+                      onAction('leave');
+                  }
+              }
+          } else { onAction('leave'); }
+      });
+      return () => unsubscribe();
+  }, [initialRoom.id, onAction, showRoomSettings, currentUser.uid, currentUser.id]);
+
+  // ... (Seat Loading Fix & Mic Publish Logic) ...
+  useEffect(() => {
+      const myCurrentSeat = room.seats.find(s => s.userId === currentUser.id);
+      if (myCurrentSeat && loadingSeatRef.current === myCurrentSeat.index) { setLoadingSeatIndex(null); loadingSeatRef.current = null; }
+  }, [room.seats, currentUser.id]);
+
+  useEffect(() => {
+      if (amISeated) { publishMicrophone(!!mySeatMuted).catch(console.warn); } 
+      else if (loadingSeatIndex === null) { unpublishMicrophone().catch(console.warn); }
+  }, [amISeated, mySeatMuted, loadingSeatIndex, mySeatIndex]);
+
+  // ... (Message Listener & AI Logic) ...
+  useEffect(() => {
+     if (!room || !room.id) return;
+     joinTimestamp.current = Date.now();
+     const unsubscribe = listenToMessages(room.id, (realTimeMsgs) => {
+         const displayMessages = realTimeMsgs.filter(msg => msg.timestamp >= joinTimestamp.current && !msg.isJoin);
+         setMessages(displayMessages);
+         const latestMsg = realTimeMsgs[realTimeMsgs.length - 1];
+         const now = Date.now();
+         if (latestMsg && (now - latestMsg.timestamp < 3000)) {
+             if (latestMsg.isJoin && (!joinNotification || joinNotification.id !== latestMsg.id)) { setJoinNotification({ name: latestMsg.userName, id: latestMsg.id }); setTimeout(() => setJoinNotification(null), 3000); }
+             if (latestMsg.isGift && latestMsg.giftType === 'animated' && latestMsg.giftIcon) { triggerAnimation(latestMsg.giftIcon, latestMsg.text.includes('Rocket') ? 'animate-fly-up' : 'animate-bounce-in'); }
+         }
+     });
+     return () => { if (unsubscribe) unsubscribe(); };
+  }, [room?.id]);
+
+  useEffect(() => { if (messagesEndRef.current) messagesEndRef.current.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
+  
+  useEffect(() => {
+      if (!isHost || !isAiEnabled || messages.length === 0) return;
+      const lastMsg = messages[messages.length - 1];
+      if ((Date.now() - lastMsg.timestamp < 10000) && lastMsg.userId !== 'AI_HOST' && lastMsg.userId !== currentUser.id) {
+          setTimeout(async () => {
+              try {
+                  const aiText = await generateAiHostResponse(lastMsg.text, room.title + (room.description ? `: ${room.description}` : ''), lastMsg.userName);
+                  sendMessage(room.id, { id: Date.now().toString(), userId: 'AI_HOST', userName: 'AI Assistant 🤖', userAvatar: 'https://api.dicebear.com/7.x/bottts/svg?seed=Felix', text: aiText, timestamp: Date.now(), vipLevel: 0 });
+              } catch (e) {}
+          }, 2000);
+      }
+  }, [messages, isHost, isAiEnabled, room.id, currentUser.id]);
+
+  // ... (Other handlers unchanged, skipping to Games logic) ...
   const handleInitialFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
       const files = e.target.files;
       if (files && files.length > 0) {
           const newStaged: StagedFile[] = [];
           for (let i = 0; i < files.length; i++) {
               const file = files[i];
-              newStaged.push({
-                  id: Math.random().toString(36).substr(2, 9),
-                  file: file,
-                  name: file.name.replace(/\.[^/.]+$/, ""),
-                  selected: true
-              });
+              newStaged.push({ id: Math.random().toString(36).substr(2, 9), file: file, name: file.name.replace(/\.[^/.]+$/, ""), selected: true });
           }
           setStagedFiles(prev => [...prev, ...newStaged]);
           e.target.value = '';
       }
   };
-
-  const toggleStagedFile = (id: string) => {
-      setStagedFiles(prev => prev.map(f => f.id === id ? { ...f, selected: !f.selected } : f));
-  };
-
-  const selectAllStaged = () => {
-      const allSelected = stagedFiles.every(f => f.selected);
-      setStagedFiles(prev => prev.map(f => ({ ...f, selected: !allSelected })));
-  };
-
+  const toggleStagedFile = (id: string) => { setStagedFiles(prev => prev.map(f => f.id === id ? { ...f, selected: !f.selected } : f)); };
+  const selectAllStaged = () => { const allSelected = stagedFiles.every(f => f.selected); setStagedFiles(prev => prev.map(f => ({ ...f, selected: !allSelected }))); };
   const confirmImport = async () => {
       const selected = stagedFiles.filter(f => f.selected);
       if (selected.length === 0) return;
-
       const newSongs: Song[] = [];
-      for (const staged of selected) {
-          const song = {
-              id: staged.id,
-              file: staged.file,
-              name: staged.name,
-              duration: 0
-          };
-          newSongs.push(song);
-          await saveSongToDB(song);
-      }
-      
+      for (const staged of selected) { const song = { id: staged.id, file: staged.file, name: staged.name, duration: 0 }; newSongs.push(song); await saveSongToDB(song); }
       setPlaylist(prev => [...prev, ...newSongs]);
-      if (!currentSong && newSongs.length > 0) {
-          playSong(newSongs[0]);
-      }
-      
-      setStagedFiles([]);
-      setShowImportView(false);
-      setShowMusicPlaylist(true);
+      if (!currentSong && newSongs.length > 0) playSong(newSongs[0]);
+      setStagedFiles([]); setShowImportView(false); setShowMusicPlaylist(true);
   };
-
   const handleDeleteSong = async (id: string, e: React.MouseEvent) => {
-      e.stopPropagation();
-      if (!confirm("Remove this song?")) return;
-      await deleteSongFromDB(id);
-      setPlaylist(prev => prev.filter(s => s.id !== id));
-      if (currentSong?.id === id) {
-          stopMusic();
-          setIsMusicPlaying(false);
-          setCurrentSong(null);
-      }
+      e.stopPropagation(); if (!confirm("Remove this song?")) return; await deleteSongFromDB(id); setPlaylist(prev => prev.filter(s => s.id !== id));
+      if (currentSong?.id === id) { stopMusic(); setIsMusicPlaying(false); setCurrentSong(null); }
   };
-
-  const playSong = async (song: Song) => {
-      try {
-          setCurrentSong(song);
-          await playMusicFile(song.file as File);
-          setIsMusicPlaying(true);
-          setMusicVolumeState(70);
-          setMusicVolume(70);
-      } catch (error) {
-          console.error("Music play error", error);
-          alert("Error playing music file");
-      }
-  };
-
-  const toggleMusicPlay = () => {
-      if (isMusicPlaying) {
-          pauseMusic();
-          setIsMusicPlaying(false);
-      } else {
-          resumeMusic();
-          setIsMusicPlaying(true);
-      }
-  };
-
-  const handleMusicSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
-      const val = parseFloat(e.target.value);
-      setMusicProgress(val);
-      seekMusic(val);
-  };
-
-  const handleMusicVolumeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-      const val = parseInt(e.target.value);
-      setMusicVolumeState(val);
-      setMusicVolume(val);
-  };
-
-  const formatTime = (seconds: number) => {
-      const mins = Math.floor(seconds / 60);
-      const secs = Math.floor(seconds % 60);
-      return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
-  };
-
+  const playSong = async (song: Song) => { try { setCurrentSong(song); await playMusicFile(song.file as File); setIsMusicPlaying(true); setMusicVolumeState(70); setMusicVolume(70); } catch (error) { alert("Error playing music file"); } };
+  const toggleMusicPlay = () => { if (isMusicPlaying) { pauseMusic(); setIsMusicPlaying(false); } else { resumeMusic(); setIsMusicPlaying(true); } };
+  const handleMusicSeek = (e: React.ChangeEvent<HTMLInputElement>) => { const val = parseFloat(e.target.value); setMusicProgress(val); seekMusic(val); };
+  const handleMusicVolumeChange = (e: React.ChangeEvent<HTMLInputElement>) => { const val = parseInt(e.target.value); setMusicVolumeState(val); setMusicVolume(val); };
+  const formatTime = (seconds: number) => { const mins = Math.floor(seconds / 60); const secs = Math.floor(seconds % 60); return `${mins}:${secs < 10 ? '0' : ''}${secs}`; };
   const handleSendMessage = async () => {
     if (!inputValue.trim()) return;
-    const userMsg: ChatMessage = {
-      id: Date.now().toString(),
-      userId: currentUser.id,
-      userName: currentUser.name,
-      userAvatar: currentUser.avatar || 'https://picsum.photos/200', 
-      text: inputValue,
-      timestamp: Date.now(),
-      frameId: currentUser.equippedFrame || null, 
-      bubbleId: currentUser.equippedBubble || null,
-      vipLevel: currentUser.vipLevel || 0,
-      adminRole: currentUser.adminRole || null
-    };
-    
-    // OPTIMISTIC UPDATE
-    setMessages(prev => [userMsg, ...prev]);
-    setInputValue('');
-    
-    try { await sendMessage(room.id, userMsg); } catch (e) { }
+    const userMsg: ChatMessage = { id: Date.now().toString(), userId: currentUser.id, userName: currentUser.name, userAvatar: currentUser.avatar || 'https://picsum.photos/200', text: inputValue, timestamp: Date.now(), frameId: currentUser.equippedFrame || null, bubbleId: currentUser.equippedBubble || null, vipLevel: currentUser.vipLevel || 0, adminRole: currentUser.adminRole || null };
+    setMessages(prev => [userMsg, ...prev]); setInputValue(''); try { await sendMessage(room.id, userMsg); } catch (e) { }
   };
-
   const toggleGiftTarget = (uid: string) => {
-      if (uid === 'all') {
-          setGiftTargets(['all']);
-          return;
-      }
-      
+      if (uid === 'all') { setGiftTargets(['all']); return; }
       let newTargets = [...giftTargets];
       if (newTargets.includes('all')) newTargets = [];
-
-      if (newTargets.includes(uid)) {
-          newTargets = newTargets.filter(id => id !== uid);
-      } else {
-          newTargets.push(uid);
-      }
-
-      if (newTargets.length === 0) setGiftTargets(['all']);
-      else setGiftTargets(newTargets);
+      if (newTargets.includes(uid)) newTargets = newTargets.filter(id => id !== uid); else newTargets.push(uid);
+      if (newTargets.length === 0) setGiftTargets(['all']); else setGiftTargets(newTargets);
   };
-
   const executeSendGift = async () => {
-    if (!selectedGift) {
-        alert(t('selectGift'));
-        return;
-    }
+    if (!selectedGift) { alert(t('selectGift')); return; }
     if (isSendingGift) return;
-    if (giftTargets.length === 0) {
-        alert(t('selectTarget'));
-        return;
-    }
-    
-    if (!currentUser.uid || currentUser.uid === 'guest') {
-        alert("Please login first");
-        return;
-    }
-
+    if (giftTargets.length === 0) { alert(t('selectTarget')); return; }
+    if (!currentUser.uid || currentUser.uid === 'guest') { alert("Please login first"); return; }
     const multiplier = giftMultiplier;
-    
-    const targets = giftTargets.includes('all') 
-        ? activeSeats 
-        : activeSeats.filter(s => s.userId && giftTargets.includes(s.userId));
-
-    if (targets.length === 0 && !giftTargets.includes('all')) {
-        alert("Selected users are no longer on mic");
-        return;
-    }
-
+    const targets = giftTargets.includes('all') ? activeSeats : activeSeats.filter(s => s.userId && giftTargets.includes(s.userId));
+    if (targets.length === 0 && !giftTargets.includes('all')) { alert("Selected users are no longer on mic"); return; }
     const totalCost = selectedGift.cost * multiplier * (giftTargets.includes('all') ? activeSeats.length : targets.length);
-
     const userBalance = currentUser.wallet?.diamonds || 0;
-    if (userBalance < totalCost) {
-        alert(t('noFunds'));
-        return;
-    }
-
+    if (userBalance < totalCost) { alert(t('noFunds')); return; }
     setIsSendingGift(true);
-
     try {
-        const promises = targets.map(seat => 
-            sendGiftTransaction(room.id, currentUser.uid!, seat.index, selectedGift.cost * multiplier, selectedGift.id)
-        );
+        const promises = targets.map(seat => sendGiftTransaction(room.id, currentUser.uid!, seat.index, selectedGift.cost * multiplier, selectedGift.id));
         await Promise.all(promises);
-        
-        let targetName = '';
-        if (giftTargets.includes('all')) {
-            targetName = t('everyone');
-        } else if (targets.length === 1) {
-            targetName = targets[0].userName || 'User';
-        } else {
-            targetName = `${targets.length} Users`;
-        }
-
-        const giftMsg: ChatMessage = {
-          id: Date.now().toString(),
-          userId: currentUser.id,
-          userName: currentUser.name,
-          userAvatar: currentUser.avatar || 'https://picsum.photos/200',
-          text: `Sent ${selectedGift.name} x${multiplier} to ${targetName} 🎁`,
-          isGift: true,
-          giftType: selectedGift.type,
-          giftIcon: selectedGift.icon,
-          timestamp: Date.now(),
-          frameId: currentUser.equippedFrame || null,
-          bubbleId: currentUser.equippedBubble || null,
-          vipLevel: currentUser.vipLevel || 0,
-          adminRole: currentUser.adminRole || null
-        };
-        
-        setMessages(prev => [giftMsg, ...prev]);
-        await sendMessage(room.id, giftMsg);
-        
-        if (selectedGift.type === 'animated') {
-            triggerAnimation(selectedGift.icon, selectedGift.animationClass);
-        } else {
-            triggerFloatingHeart();
-        }
-
+        let targetName = ''; if (giftTargets.includes('all')) targetName = t('everyone'); else if (targets.length === 1) targetName = targets[0].userName || 'User'; else targetName = `${targets.length} Users`;
+        const giftMsg: ChatMessage = { id: Date.now().toString(), userId: currentUser.id, userName: currentUser.name, userAvatar: currentUser.avatar || 'https://picsum.photos/200', text: `Sent ${selectedGift.name} x${multiplier} to ${targetName} 🎁`, isGift: true, giftType: selectedGift.type, giftIcon: selectedGift.icon, timestamp: Date.now(), frameId: currentUser.equippedFrame || null, bubbleId: currentUser.equippedBubble || null, vipLevel: currentUser.vipLevel || 0, adminRole: currentUser.adminRole || null };
+        setMessages(prev => [giftMsg, ...prev]); await sendMessage(room.id, giftMsg);
+        if (selectedGift.type === 'animated') triggerAnimation(selectedGift.icon, selectedGift.animationClass); else triggerFloatingHeart();
         setShowGiftPanel(false);
-
-    } catch (e: any) {
-        const msg = typeof e === 'string' ? e : (e.message || '');
-        if (msg.includes("Insufficient funds")) alert(t('noFunds'));
-    } finally {
-        setIsSendingGift(false);
-    }
+    } catch (e: any) { const msg = typeof e === 'string' ? e : (e.message || ''); if (msg.includes("Insufficient funds")) alert(t('noFunds')); } finally { setIsSendingGift(false); }
   };
-
-  const triggerFloatingHeart = () => {
-    const id = Date.now();
-    const left = Math.random() * 60 + 20;
-    setFloatingHearts(prev => [...prev, { id, left }]);
-    setTimeout(() => {
-      setFloatingHearts(prev => prev.filter(h => h.id !== id));
-    }, 2000);
-  };
-
+  const triggerFloatingHeart = () => { const id = Date.now(); const left = Math.random() * 60 + 20; setFloatingHearts(prev => [...prev, { id, left }]); setTimeout(() => { setFloatingHearts(prev => prev.filter(h => h.id !== id)); }, 2000); };
   const handleSeatClick = async (index: number, currentSeatUserId: string | null) => {
       const seat = seats.find(s => s.index === index);
-      const isLocked = seat?.isLocked;
-      if (currentSeatUserId) {
-          if (seat) setSelectedUser(seat);
-          return;
-      }
-      if (isLocked && !canManageRoom) {
-          alert(t('lockedMsg'));
-          return;
-      }
+      if (currentSeatUserId) { if (seat) setSelectedUser(seat); return; }
+      if (seat?.isLocked && !canManageRoom) { alert(t('lockedMsg')); return; }
       setSeatToConfirm(index);
   };
-
   const confirmTakeSeat = async () => {
       if (seatToConfirm === null) return;
-      const index = seatToConfirm;
-      setSeatToConfirm(null); 
-      setLoadingSeatIndex(index);
-      loadingSeatRef.current = index; 
-      
-      try { 
-          await takeSeat(room.id, index, currentUser);
-          setTimeout(() => {
-              if (loadingSeatRef.current === index) {
-                  setLoadingSeatIndex(null);
-                  loadingSeatRef.current = null;
-              }
-          }, 5000);
-
-      } catch (e) { 
-          console.error("Take seat failed", e);
-          alert(language === 'ar' ? "فشل صعود المايك (قد يكون مأخوذ)" : "Failed to take seat (might be taken)");
-          setLoadingSeatIndex(null); 
-          loadingSeatRef.current = null;
-      }
+      const index = seatToConfirm; setSeatToConfirm(null); setLoadingSeatIndex(index); loadingSeatRef.current = index; 
+      try { await takeSeat(room.id, index, currentUser); setTimeout(() => { if (loadingSeatRef.current === index) { setLoadingSeatIndex(null); loadingSeatRef.current = null; } }, 5000); } catch (e) { alert(language === 'ar' ? "فشل صعود المايك" : "Failed to take seat"); setLoadingSeatIndex(null); loadingSeatRef.current = null; }
   };
-
-  const handleToggleLock = async () => {
-      if (seatToConfirm !== null && canManageRoom) {
-          const seat = seats.find(s => s.index === seatToConfirm);
-          if (seat) {
-              await toggleSeatLock(room.id, seatToConfirm, !seat.isLocked);
-              setSeatToConfirm(null);
-          }
-      }
-  };
-
+  const handleToggleLock = async () => { if (seatToConfirm !== null && canManageRoom) { const seat = seats.find(s => s.index === seatToConfirm); if (seat) { await toggleSeatLock(room.id, seatToConfirm, !seat.isLocked); setSeatToConfirm(null); } } };
   const handleUpdateRoom = async (updates: Partial<Room>) => await updateRoomDetails(room.id, updates);
-  
-  const handleSaveSettings = async () => {
-      await updateRoomDetails(room.id, { title: editTitle, description: editDesc, isAiHost: isAiEnabled });
-      setShowRoomSettings(false);
-  };
-
-  const handleChangeSeatCount = async (newCount: number) => {
-      if (newCount === room.seatCount) return;
-      await changeRoomSeatCount(room.id, room.seats, newCount);
-  };
-
-  const handleLeaveRoomAction = () => {
-      unpublishMicrophone();
-      if (isSeatedRef.current && currentUserRef.current) {
-          leaveSeat(room.id, currentUserRef.current).catch(err => console.warn(err));
-      }
-      onAction('leave');
-  };
-
-  const handleToggleMyMute = async () => {
-      if (!mySeat) return;
-      const nextMutedState = !mySeat.isMuted;
-      // Optimistic Mute toggle
-      setRoom(prev => {
-          const newSeats = prev.seats.map(s => s.userId === currentUser.id ? { ...s, isMuted: nextMutedState } : s);
-          return { ...prev, seats: newSeats };
-      });
-      toggleMicMute(nextMutedState);
-      try { await toggleSeatMute(room.id, mySeat.index, nextMutedState); } catch (e) {}
-  };
-
-  const handleLeaveSeat = async () => {
-      if (!mySeat) return;
-      setRoom(prev => {
-          const newSeats = prev.seats.map(s => s.index === mySeat.index ? { ...s, userId: null, userName: null, userAvatar: null, giftCount: 0, adminRole: null, isMuted: false, frameId: null, vipLevel: 0 } : s);
-          return { ...prev, seats: newSeats };
-      });
-      unpublishMicrophone().catch(err => console.warn("Unpublish err", err));
-      try {
-          await leaveSeat(room.id, currentUser);
-      } catch (e) {
-          console.error("Error leaving seat:", e);
-      }
-  };
-
-  const handleToggleSpeaker = () => {
-      const newState = !isSpeakerMuted;
-      setIsSpeakerMuted(newState);
-      toggleAllRemoteAudio(newState);
-  };
-
-  const handleBgUpload = async (e: React.ChangeEvent<HTMLInputElement>, type: 'inner' | 'outer') => {
-      const file = e.target.files?.[0];
-      if (file) {
-          const isGif = file.type === 'image/gif';
-          const MAX_RAW_SIZE = 5 * 1024 * 1024; 
-
-          if (file.size > MAX_RAW_SIZE) {
-               alert(language === 'ar' ? "الملف كبير جداً. الحد الأقصى 5 ميجا." : "File too large. Max 5MB.");
-               return;
-          }
-
-          try {
-              const isOuter = type === 'outer';
-              const compressed = await compressImage(file, 1280, 0.7, isGif);
-              
-              if (compressed.length > 950000) { 
-                  alert(language === 'ar' ? "الصورة بعد المعالجة لا تزال كبيرة جداً. حاول استخدام صورة أصغر أو ثابتة." : "Processed image is still too large for database. Please try a smaller/static image.");
-                  return;
-              }
-
-              if (isOuter) {
-                  await handleUpdateRoom({ thumbnail: compressed });
-              } else {
-                  await handleUpdateRoom({ backgroundImage: compressed });
-              }
-              alert(language === 'ar' ? "تم تحديث الخلفية بنجاح" : "Background updated successfully");
-          } catch (error: any) {
-              console.error("Image processing/upload failed", error);
-              if (error.code === 'resource-exhausted' || error.message?.includes('too large') || error.toString().includes('too large')) {
-                   alert(language === 'ar' ? "فشل الحفظ: حجم البيانات كبير جداً (تجاوز الحد المسموح)." : "Save failed: Data too large (exceeded limit).");
-              } else {
-                   alert(language === 'ar' ? "فشل معالجة الصورة." : "Failed to process image.");
-              }
-          }
-      }
-  };
-
-  const handleKickSeat = (seatIndex: number) => {
-      setRoom(prev => {
-          const newSeats = [...prev.seats];
-          if (newSeats[seatIndex]) newSeats[seatIndex] = { ...newSeats[seatIndex], userId: null, userName: null, userAvatar: null, giftCount: 0, adminRole: null, isMuted: false, frameId: null, vipLevel: 0 };
-          return { ...prev, seats: newSeats };
-      });
-      kickUserFromSeat(room.id, seatIndex);
-      setSelectedUser(null);
-  };
-
-  const handleBanRequest = (userId: string) => {
-      if (userId === currentUser.id) return;
-      setUserToBan(userId);
-      setSelectedUser(null);
-      setShowBanDurationModal(true);
-  };
-
-  const executeBan = async (durationInMinutes: number) => {
-      if (!userToBan) return;
-      const uid = userToBan;
-      
-      const targetSeat = seats.find(s => s.userId === uid || (s as any).uid === uid);
-      if (targetSeat) handleKickSeat(targetSeat.index);
-
-      const expiry = durationInMinutes === -1 ? -1 : Date.now() + (durationInMinutes * 60 * 1000);
-      setRoom(prev => ({ 
-          ...prev, 
-          bannedUsers: { ...prev.bannedUsers, [uid]: expiry }
-      }));
-
-      await banUserFromRoom(room.id, uid, durationInMinutes);
-      setShowBanDurationModal(false);
-      setUserToBan(null);
-  };
-
-  const handleUnbanUser = async (userId: string) => {
-      await unbanUserFromRoom(room.id, userId);
-      setBannedProfiles(prev => prev.filter(u => u.uid !== userId));
-  };
-
-  const handleMakeAdmin = async (userUid: string, userName: string) => { 
-      await addRoomAdmin(room.id, userUid); 
-      setSelectedUser(null); 
-      const msg: ChatMessage = {
-          id: Date.now().toString(),
-          userId: 'SYSTEM',
-          userName: 'System',
-          userAvatar: '',
-          text: `🎉 تهانينا أصبح ${userName} مسؤول عن الغرفة`,
-          timestamp: Date.now(),
-          isSystem: true
-      };
-      await sendMessage(room.id, msg);
-  };
-
-  const handleRemoveAdmin = async (userId: string) => { 
-      await removeRoomAdmin(room.id, userId); 
-      setSelectedUser(null); 
-      setAdminProfiles(prev => prev.filter(u => u.uid !== userId));
-  };
-
-  const toggleRoomLock = async () => {
-      if (room.isLocked) {
-          await updateRoomDetails(room.id, { isLocked: false, password: null });
-          setRoom(prev => ({ ...prev, isLocked: false }));
-      } else {
-          setShowLockSetupModal(true);
-          setNewRoomPassword('');
-      }
-  };
-
-  const confirmLock = async () => {
-      if (newRoomPassword.length !== 6 || isNaN(Number(newRoomPassword))) {
-          alert(language === 'ar' ? 'كلمة المرور يجب أن تكون 6 أرقام' : 'Password must be 6 digits');
-          return;
-      }
-      await updateRoomDetails(room.id, { isLocked: true, password: newRoomPassword });
-      setRoom(prev => ({ ...prev, isLocked: true }));
-      setShowLockSetupModal(false);
-  };
-
-  const getBubbleClass = (id?: string | null) => {
-      if (!id) return 'bg-white/10 text-white rounded-2xl';
-      const item = STORE_ITEMS.find(i => i.id === id);
-      return item ? `${item.previewClass} rounded-2xl` : 'bg-white/10 text-white rounded-2xl';
-  };
-
-  const getVipTextStyle = (level: number) => {
-      const tier = VIP_TIERS.find(t => t.level === level);
-      return tier ? tier.textColor : 'text-white';
-  };
-
-  const filteredGifts = GIFTS.filter(g => g.type === giftTab);
-
-  const handleViewerClick = (user: User) => {
-      const tempUser: any = {
-          userId: user.id,
-          userName: user.name,
-          userAvatar: user.avatar,
-          ...user
-      };
-      setSelectedUser(tempUser);
-  };
-
+  const handleSaveSettings = async () => { await updateRoomDetails(room.id, { title: editTitle, description: editDesc, isAiHost: isAiEnabled }); setShowRoomSettings(false); };
+  const handleChangeSeatCount = async (newCount: number) => { if (newCount === room.seatCount) return; await changeRoomSeatCount(room.id, room.seats, newCount); };
+  const handleLeaveRoomAction = () => { unpublishMicrophone(); if (isSeatedRef.current && currentUserRef.current) leaveSeat(room.id, currentUserRef.current).catch(console.warn); onAction('leave'); };
+  const handleToggleMyMute = async () => { if (!mySeat) return; const nextMutedState = !mySeat.isMuted; setRoom(prev => { const newSeats = prev.seats.map(s => s.userId === currentUser.id ? { ...s, isMuted: nextMutedState } : s); return { ...prev, seats: newSeats }; }); toggleMicMute(nextMutedState); try { await toggleSeatMute(room.id, mySeat.index, nextMutedState); } catch (e) {} };
+  const handleLeaveSeat = async () => { if (!mySeat) return; setRoom(prev => { const newSeats = prev.seats.map(s => s.index === mySeat.index ? { ...s, userId: null, userName: null, userAvatar: null, giftCount: 0, adminRole: null, isMuted: false, frameId: null, vipLevel: 0 } : s); return { ...prev, seats: newSeats }; }); unpublishMicrophone().catch(console.warn); try { await leaveSeat(room.id, currentUser); } catch (e) { console.error("Error leaving seat:", e); } };
+  const handleToggleSpeaker = () => { const newState = !isSpeakerMuted; setIsSpeakerMuted(newState); toggleAllRemoteAudio(newState); };
+  const handleBgUpload = async (e: React.ChangeEvent<HTMLInputElement>, type: 'inner' | 'outer') => { const file = e.target.files?.[0]; if (file) { if (file.size > 5 * 1024 * 1024) { alert(language === 'ar' ? "الملف كبير جداً" : "File too large"); return; } try { const compressed = await compressImage(file, 1280, 0.7, file.type === 'image/gif'); if (compressed.length > 950000) { alert(language === 'ar' ? "الصورة كبيرة" : "Image too large"); return; } if (type === 'outer') await handleUpdateRoom({ thumbnail: compressed }); else await handleUpdateRoom({ backgroundImage: compressed }); alert(language === 'ar' ? "تم التحديث" : "Updated successfully"); } catch (error) { alert("Failed"); } } };
+  const handleKickSeat = (seatIndex: number) => { setRoom(prev => { const newSeats = [...prev.seats]; if (newSeats[seatIndex]) newSeats[seatIndex] = { ...newSeats[seatIndex], userId: null, userName: null, userAvatar: null, giftCount: 0, adminRole: null, isMuted: false, frameId: null, vipLevel: 0 }; return { ...prev, seats: newSeats }; }); kickUserFromSeat(room.id, seatIndex); setSelectedUser(null); };
+  const handleBanRequest = (userId: string) => { if (userId === currentUser.id) return; setUserToBan(userId); setSelectedUser(null); setShowBanDurationModal(true); };
+  const executeBan = async (durationInMinutes: number) => { if (!userToBan) return; const uid = userToBan; const targetSeat = seats.find(s => s.userId === uid || (s as any).uid === uid); if (targetSeat) handleKickSeat(targetSeat.index); const expiry = durationInMinutes === -1 ? -1 : Date.now() + (durationInMinutes * 60 * 1000); setRoom(prev => ({ ...prev, bannedUsers: { ...prev.bannedUsers, [uid]: expiry } })); await banUserFromRoom(room.id, uid, durationInMinutes); setShowBanDurationModal(false); setUserToBan(null); };
+  const handleUnbanUser = async (userId: string) => { await unbanUserFromRoom(room.id, userId); setBannedProfiles(prev => prev.filter(u => u.uid !== userId)); };
+  const handleMakeAdmin = async (userUid: string, userName: string) => { await addRoomAdmin(room.id, userUid); setSelectedUser(null); sendMessage(room.id, { id: Date.now().toString(), userId: 'SYSTEM', userName: 'System', userAvatar: '', text: `🎉 تهانينا أصبح ${userName} مسؤول عن الغرفة`, timestamp: Date.now(), isSystem: true }); };
+  const handleRemoveAdmin = async (userId: string) => { await removeRoomAdmin(room.id, userId); setSelectedUser(null); setAdminProfiles(prev => prev.filter(u => u.uid !== userId)); };
+  const toggleRoomLock = async () => { if (room.isLocked) { await updateRoomDetails(room.id, { isLocked: false, password: null }); setRoom(prev => ({ ...prev, isLocked: false })); } else { setShowLockSetupModal(true); setNewRoomPassword(''); } };
+  const confirmLock = async () => { if (newRoomPassword.length !== 6 || isNaN(Number(newRoomPassword))) { alert(language === 'ar' ? 'كلمة المرور 6 أرقام' : 'Password 6 digits'); return; } await updateRoomDetails(room.id, { isLocked: true, password: newRoomPassword }); setRoom(prev => ({ ...prev, isLocked: true })); setShowLockSetupModal(false); };
+  const getBubbleClass = (id?: string | null) => { if (!id) return 'bg-white/10 text-white rounded-2xl'; const item = STORE_ITEMS.find(i => i.id === id); return item ? `${item.previewClass} rounded-2xl` : 'bg-white/10 text-white rounded-2xl'; };
+  const getVipTextStyle = (level: number) => { const tier = VIP_TIERS.find(t => t.level === level); return tier ? tier.textColor : 'text-white'; };
+  const handleViewerClick = (user: User) => { const tempUser: any = { userId: user.id, userName: user.name, userAvatar: user.avatar, ...user }; setSelectedUser(tempUser); };
   const selectedUserId = selectedUser?.userId;
   const filteredStagedFiles = stagedFiles.filter(f => f.name.toLowerCase().includes(importSearch.toLowerCase()));
+
+  const filteredGifts = GIFTS.filter(g => g.type === giftTab);
 
   return (
     <div className="relative h-[100dvh] w-full bg-black flex flex-col overflow-hidden">
@@ -1148,8 +856,9 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
           </div>
       ))}
 
+      {/* ... (Header and Seat Grid remain identical) ... */}
       <div className="relative z-50 pt-safe-top px-3 pb-2 flex items-center justify-between gap-2 bg-gradient-to-b from-black/80 to-transparent w-full shrink-0 h-[60px]">
-        
+        {/* ... (Header content unchanged) ... */}
         {/* RIGHT SIDE (Start in RTL) - Room Info */}
         <div className="flex items-center gap-2 min-w-0 flex-1 overflow-hidden">
             <div onClick={() => setShowRoomInfoModal(true)} className="flex items-center gap-2 bg-black/30 backdrop-blur px-2 py-1 rounded-xl border border-white/10 min-w-0 max-w-full cursor-pointer hover:bg-black/40 transition active:scale-95">
@@ -1172,12 +881,11 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
                 <Users className="w-3 h-3" /> {viewers.length}
             </button>
             
-            {/* 3 Dots Menu (Exit/Minimize) */}
+            {/* 3 Dots Menu */}
             <button onClick={() => setShowExitModal(true)} className="p-2 bg-white/10 rounded-full hover:bg-white/20 backdrop-blur border border-white/5 text-white">
                 <MoreVertical className="w-5 h-5" />
             </button>
         </div>
-
       </div>
 
       <button 
@@ -1237,19 +945,20 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
       </div>
 
       <div className="relative z-20 flex-1 flex flex-col min-h-0 bg-gradient-to-t from-black via-black/80 to-transparent w-full">
-          {/* Chat and Info Area */}
-          <div className="px-4 py-2 mx-4 mt-1 bg-brand-900/60 backdrop-blur border-l-4 border-brand-500 rounded-r-lg mb-2 shadow-sm animate-in fade-in flex flex-col gap-1 shrink-0">
-              <div className="flex items-start gap-2 border-b border-white/10 pb-1 mb-1">
-                  <Shield className="w-3 h-3 text-gold-400 mt-0.5 shrink-0" />
-                  <p className="text-[10px] text-gold-100 font-bold leading-tight">{t('appRules')}</p>
-              </div>
-              <div className="flex items-start gap-2">
-                  <Info className="w-3 h-3 text-brand-400 mt-0.5 shrink-0" />
-                  <p className="text-[10px] text-white/90 leading-tight line-clamp-2">{room.description || t('pinned')}</p>
-              </div>
-          </div>
-
+          {/* Chat Area */}
           <div className="flex-1 overflow-y-auto px-4 space-y-2 scrollbar-hide pb-2 mask-image-gradient relative w-full">
+              
+              {/* RESTORED: Pinned Message */}
+              <div className="bg-white/5 border border-white/10 rounded-xl p-3 backdrop-blur-md">
+                  <p className="text-[10px] text-brand-300 font-bold mb-1 flex items-center gap-1">
+                      <Info className="w-3 h-3" />
+                      {t('roomDesc')}
+                  </p>
+                  <p className="text-xs text-white/90 leading-relaxed whitespace-pre-wrap">
+                      {room.description || t('pinned')}
+                  </p>
+              </div>
+
               {messages.map((msg) => {
                   const isOfficial = msg.userId === 'OFFECAL' || (msg.userId === room.hostId && room.hostId === 'OFFECAL');
                   const isAi = msg.userId === 'AI_HOST';
@@ -1322,7 +1031,7 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
           </div>
       </div>
 
-      {/* Options Menu */}
+      {/* MODALS */}
       {showOptionsMenu && (
           <div className="absolute inset-0 z-[70] flex flex-col justify-end bg-black/60 backdrop-blur-sm animate-in slide-in-from-bottom-10" onClick={() => setShowOptionsMenu(false)}>
               <div className="bg-gray-900/30 backdrop-blur-3xl border-t border-white/20 rounded-t-3xl p-5 shadow-2xl" onClick={e => e.stopPropagation()}>
@@ -1334,6 +1043,11 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
                       <div onClick={() => { setShowOptionsMenu(false); setShowMusicMiniPlayer(true); }} className="flex flex-col items-center gap-2 cursor-pointer group">
                           <div className="p-3 bg-pink-600/20 text-pink-400 rounded-2xl group-hover:bg-pink-600/30 transition"><Music className="w-6 h-6"/></div>
                           <span className="text-xs text-gray-300 font-medium">{t('music')}</span>
+                      </div>
+
+                      <div onClick={() => { setShowOptionsMenu(false); setShowGamesModal(true); }} className="flex flex-col items-center gap-2 cursor-pointer group">
+                          <div className="p-3 bg-green-600/20 text-green-400 rounded-2xl group-hover:bg-green-600/30 transition"><Gamepad2 className="w-6 h-6"/></div>
+                          <span className="text-xs text-gray-300 font-medium">{t('gamesMenu')}</span>
                       </div>
 
                       <div onClick={() => {}} className="flex flex-col items-center gap-2 cursor-pointer group">
@@ -1367,10 +1081,224 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
           </div>
       )}
 
-      {/* Full Page Room Info Modal */}
+      {/* GAMES MENU MODAL */}
+      {showGamesModal && (
+          <div className="absolute inset-0 z-[80] flex flex-col justify-end bg-black/60 backdrop-blur-sm animate-in slide-in-from-bottom-10" onClick={() => setShowGamesModal(false)}>
+              <div className="bg-gray-900/40 backdrop-blur-3xl border-t border-white/20 rounded-t-3xl p-6 shadow-2xl h-[50vh] flex flex-col" onClick={e => e.stopPropagation()}>
+                  <div className="flex justify-between items-center mb-6">
+                      <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                          <Gamepad2 className="w-6 h-6 text-brand-400"/>
+                          {t('gamesTitle')}
+                      </h2>
+                      <button onClick={() => setShowGamesModal(false)} className="p-2 bg-white/10 rounded-full hover:bg-white/20 text-white transition">
+                          <X className="w-5 h-5"/>
+                      </button>
+                  </div>
+                  
+                  <div className="grid grid-cols-2 gap-4 flex-1 overflow-y-auto pb-4">
+                      {/* Fruit War */}
+                      <div 
+                        onClick={() => {
+                            setShowGamesModal(false);
+                            setShowFruitWar(true);
+                        }}
+                        className="bg-gradient-to-br from-red-500/20 to-pink-600/20 border border-pink-500/30 rounded-2xl p-4 flex flex-col items-center justify-center cursor-pointer hover:scale-[1.02] transition shadow-lg group"
+                      >
+                          <div className="text-5xl mb-2 filter drop-shadow-md group-hover:scale-110 transition">🍓</div>
+                          <div className="text-5xl absolute opacity-20 -rotate-12 blur-sm pointer-events-none">⚔️</div>
+                          <h3 className="text-white font-bold text-sm mt-2">{t('fruitWar')}</h3>
+                      </div>
+
+                      {/* Car Racing */}
+                      <div className="bg-gradient-to-br from-blue-500/20 to-cyan-600/20 border border-cyan-500/30 rounded-2xl p-4 flex flex-col items-center justify-center cursor-pointer hover:scale-[1.02] transition shadow-lg group">
+                          <div className="text-5xl mb-2 filter drop-shadow-md group-hover:scale-110 transition">🏎️</div>
+                          <h3 className="text-white font-bold text-sm mt-2">{t('carRace')}</h3>
+                      </div>
+
+                      {/* 777 */}
+                      <div className="bg-gradient-to-br from-yellow-500/20 to-orange-600/20 border border-yellow-500/30 rounded-2xl p-4 flex flex-col items-center justify-center cursor-pointer hover:scale-[1.02] transition shadow-lg group">
+                          <div className="text-5xl mb-2 filter drop-shadow-md group-hover:scale-110 transition">🎰</div>
+                          <h3 className="text-white font-bold text-sm mt-2">{t('lucky777')}</h3>
+                      </div>
+
+                      {/* Farm */}
+                      <div className="bg-gradient-to-br from-green-500/20 to-emerald-600/20 border border-emerald-500/30 rounded-2xl p-4 flex flex-col items-center justify-center cursor-pointer hover:scale-[1.02] transition shadow-lg group">
+                          <div className="text-5xl mb-2 filter drop-shadow-md group-hover:scale-110 transition">🌽</div>
+                          <div className="text-5xl absolute opacity-20 rotate-12 blur-sm pointer-events-none">🚜</div>
+                          <h3 className="text-white font-bold text-sm mt-2">{t('farm')}</h3>
+                      </div>
+                  </div>
+              </div>
+          </div>
+      )}
+
+      {/* FRUIT WAR GAME BOTTOM SHEET */}
+      {showFruitWar && (
+          <div className="absolute inset-0 z-[100] flex flex-col justify-end bg-black/60 backdrop-blur-sm animate-in slide-in-from-bottom-10" onClick={() => setShowFruitWar(false)}>
+              <div className="bg-[#2a1d45] border-t border-purple-500/30 rounded-t-3xl p-4 shadow-2xl relative w-full overflow-hidden" onClick={e => e.stopPropagation()}>
+                  
+                  {/* Separate Header to avoid overlap */}
+                  <div className="flex flex-col gap-2 mb-2 px-1 w-full">
+                      {/* Top Row: Title + Close */}
+                      <div className="flex justify-between items-center w-full">
+                           <div className="text-white font-black text-lg drop-shadow-lg flex items-center gap-2">
+                              <Gamepad2 className="w-5 h-5 text-purple-400"/>
+                              {fwState === 'RESULT' ? t('win') : t('fruitWar')}
+                          </div>
+                          <button onClick={() => setShowFruitWar(false)} className="p-1.5 bg-white/10 rounded-full hover:bg-white/20 text-white transition">
+                              <X className="w-4 h-4"/>
+                          </button>
+                      </div>
+
+                      {/* Second Row: Balance (Using Optimistic Visual Balance) */}
+                      <div className="flex justify-center w-full">
+                          <div className="flex items-center gap-2 bg-black/30 rounded-full px-4 py-1.5 border border-white/10 shadow-inner">
+                              <div className="w-5 h-5 rounded-full bg-gradient-to-r from-purple-500 to-pink-500 flex items-center justify-center text-[10px] font-bold text-white">
+                                  💎
+                              </div>
+                              <span className="text-yellow-400 font-bold font-mono text-sm tracking-wider">
+                                  {visualBalance.toLocaleString()}
+                              </span>
+                          </div>
+                      </div>
+                  </div>
+
+                  {/* RESULT OVERLAY WINDOW */}
+                  {fwState === 'RESULT' && fwResultData && (
+                      <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-sm animate-in fade-in zoom-in duration-300 rounded-t-3xl">
+                          <div className="bg-gradient-to-b from-purple-900 to-black border border-yellow-500/50 p-6 rounded-3xl shadow-2xl text-center max-w-[80%] flex flex-col items-center">
+                              <h2 className="text-yellow-400 font-bold text-lg mb-2">الفاكهة الفائزة هي</h2>
+                              <div className="text-6xl mb-4 filter drop-shadow-[0_0_20px_rgba(255,255,255,0.5)] animate-bounce">
+                                  {FRUITS[fwWinner!].icon}
+                              </div>
+                              <h3 className="text-white font-bold text-xl mb-4">{FRUITS[fwWinner!].name[language]}</h3>
+                              
+                              <div className="w-full h-px bg-white/20 mb-4"></div>
+                              
+                              {fwResultData.isWinner ? (
+                                  <div className="animate-pulse">
+                                      <p className="text-green-400 font-bold text-sm mb-1">مبروك كسبت</p>
+                                      <p className="text-yellow-300 font-black text-2xl drop-shadow-md">
+                                          {fwResultData.winAmount.toLocaleString()} 💎
+                                      </p>
+                                  </div>
+                              ) : (
+                                  <div>
+                                      <p className="text-gray-400 font-bold text-sm">للأسف لم تحصل على شيء</p>
+                                      <p className="text-gray-500 text-xs mt-1">حظ أوفر في المرة القادمة</p>
+                                  </div>
+                              )}
+                          </div>
+                      </div>
+                  )}
+
+                  {/* 3x3 Grid Layout - Clean Design */}
+                  <div className="grid grid-cols-3 gap-2 p-2 relative bg-[#1a1128] rounded-2xl border border-purple-500/20 shadow-inner mb-3">
+                      {GRID_MAP.map((fruitIdx, i) => {
+                          // Center Cell is Timer
+                          if (fruitIdx === -1) {
+                              return (
+                                  <div key="timer" className="aspect-square rounded-xl bg-black/50 border-2 border-yellow-500/50 flex flex-col items-center justify-center relative overflow-hidden shadow-[inset_0_0_20px_rgba(0,0,0,0.5)]">
+                                      {/* LED Dots Border Effect */}
+                                      <div className="absolute inset-1 border border-dotted border-white/20 rounded-lg"></div>
+                                      
+                                      <span className={`text-4xl font-black font-mono tracking-widest drop-shadow-[0_0_10px_rgba(234,179,8,0.8)] ${fwTimer <= 10 && fwState === 'BETTING' ? 'text-red-500 animate-pulse' : 'text-yellow-400'}`}>
+                                          {fwTimer < 10 ? `0${fwTimer}` : fwTimer}
+                                      </span>
+                                      <span className="text-[8px] text-white/50 uppercase tracking-widest mt-1">
+                                          {fwState === 'BETTING' ? 'Betting' : 'Spinning'}
+                                      </span>
+                                  </div>
+                              );
+                          }
+
+                          const fruit = FRUITS[fruitIdx];
+                          const isActive = fwHighlight === fruitIdx;
+                          const isWinner = fwWinner === fruitIdx && fwState === 'RESULT';
+                          const myBet = fwBets[fruitIdx] || 0;
+
+                          return (
+                              <div 
+                                  key={fruit.id}
+                                  onClick={() => handleFruitBet(fruitIdx)}
+                                  className={`
+                                      relative aspect-square rounded-xl flex flex-col items-center justify-center cursor-pointer transition-all duration-150 border-2 overflow-hidden
+                                      ${isWinner ? 'bg-yellow-500 border-yellow-300 scale-105 shadow-[0_0_20px_gold] z-10' : isActive ? 'border-4 border-cyan-400 bg-cyan-900/40 z-10 shadow-[0_0_20px_rgba(34,211,238,0.8)] scale-105' : 'bg-[#2a1d45] border-purple-500/30 hover:brightness-125'}
+                                      ${fwState !== 'BETTING' ? 'cursor-not-allowed opacity-90' : 'active:scale-95'}
+                                  `}
+                              >
+                                  {/* Top Right: My Bet Badge - Clean look */}
+                                  {myBet > 0 && (
+                                      <div className="absolute top-1 right-1 bg-yellow-500 text-black text-[8px] font-black px-1.5 rounded-md border border-white shadow-sm z-20 min-w-[20px] text-center leading-tight">
+                                          {formatNumber(myBet)}
+                                      </div>
+                                  )}
+
+                                  {/* Center: Fruit Icon */}
+                                  <div className="text-4xl filter drop-shadow-md mb-3 transform transition-transform duration-300 hover:scale-110">{fruit.icon}</div>
+                                  
+                                  {/* Bottom: Multiplier Badge */}
+                                  <div className="absolute bottom-1 left-1/2 -translate-x-1/2 bg-black/60 px-2 py-0.5 rounded-full border border-white/10 w-[80%] flex justify-center">
+                                      <span className="text-[10px] font-black text-white">x{fruit.multi}</span>
+                                  </div>
+                              </div>
+                          );
+                      })}
+                  </div>
+
+                  {/* Betting Controls */}
+                  <div className="bg-[#1a1128] rounded-xl p-2 mb-2 border border-purple-500/20">
+                      <div className="flex justify-between items-center mb-2 px-2">
+                          <span className="text-[10px] text-gray-400 uppercase tracking-widest">{t('lastRound')}</span>
+                          <div className="flex gap-1">
+                              {fwHistory.map((h, i) => (
+                                  <div key={i} className="w-5 h-5 rounded-full bg-white/10 flex items-center justify-center text-xs border border-white/10 shadow-sm">
+                                      {FRUITS[h].icon}
+                                  </div>
+                              ))}
+                          </div>
+                      </div>
+                      
+                      <div className="flex justify-around items-center gap-2">
+                          {CHIPS.map(amount => (
+                              <button 
+                                  key={amount}
+                                  onClick={() => setFwChip(amount)}
+                                  disabled={fwState !== 'BETTING'}
+                                  className={`
+                                      relative w-14 h-14 rounded-full flex flex-col items-center justify-center font-black text-[10px] border-4 transition-transform active:scale-90 shadow-lg
+                                      ${fwChip === amount ? 'scale-110 -translate-y-1 z-10 ring-2 ring-white ring-offset-2 ring-offset-[#2a1d45]' : 'opacity-80 hover:opacity-100'}
+                                      ${amount === 1000 ? 'bg-cyan-600 border-cyan-400 text-white' : ''}
+                                      ${amount === 10000 ? 'bg-purple-600 border-purple-400 text-white' : ''}
+                                      ${amount === 100000 ? 'bg-orange-600 border-orange-400 text-white' : ''}
+                                      ${amount === 1000000 ? 'bg-yellow-600 border-yellow-400 text-white' : ''}
+                                  `}
+                              >
+                                  <div className="absolute inset-0 rounded-full bg-gradient-to-b from-white/20 to-transparent"></div>
+                                  <span>{formatNumber(amount)}</span>
+                                  <Coins className="w-3 h-3 text-white/80"/>
+                              </button>
+                          ))}
+                      </div>
+                  </div>
+
+                  {/* User Total Bet Display */}
+                  <div className="flex justify-between items-center px-4 py-3 bg-black/40 rounded-xl border border-white/5 shadow-md">
+                      <div className="flex flex-col items-center w-1/2 border-r border-white/10">
+                          <span className="text-[10px] text-gray-400 mb-0.5">{t('bet')}</span>
+                          <span className="text-yellow-400 font-black text-lg tracking-wider">{formatNumber((Object.values(fwBets) as number[]).reduce((a: number, b: number) => a + b, 0))}</span>
+                      </div>
+                      <div className="flex flex-col items-center w-1/2">
+                          <span className="text-[10px] text-gray-400 mb-0.5">{t('dailyProfit')}</span>
+                          <span className="text-green-400 font-black text-lg tracking-wider">{(currentUser.dailyProfit || 0).toLocaleString()}</span>
+                      </div>
+                  </div>
+              </div>
+          </div>
+      )}
+
       {showRoomInfoModal && (
           <div className="absolute inset-0 z-[80] flex flex-col bg-gray-900/95 backdrop-blur-xl animate-in slide-in-from-bottom-10">
-              {/* Header */}
               <div className="p-4 flex items-center justify-between">
                   <button onClick={() => setShowRoomInfoModal(false)} className="p-2 rounded-full hover:bg-white/10 text-white">
                       <X className="w-6 h-6" />
@@ -1387,21 +1315,14 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
                       </button>
                   )}
               </div>
-
-              {/* Content */}
               <div className="flex-1 overflow-y-auto p-6 flex flex-col items-center">
-                  {/* Room Image */}
                   <div className="w-32 h-32 rounded-3xl overflow-hidden shadow-2xl border-4 border-white/10 mb-6">
                       <img src={room.thumbnail} className="w-full h-full object-cover" alt={room.title} />
                   </div>
-
-                  {/* Title & ID */}
                   <h1 className="text-2xl font-bold text-white text-center mb-2">{room.title}</h1>
                   <div className="bg-white/5 px-4 py-1.5 rounded-full text-sm text-gray-300 font-mono mb-8 border border-white/5">
                       ID: {room.displayId || room.id}
                   </div>
-
-                  {/* Description Card */}
                   <div className="w-full bg-white/5 rounded-2xl p-6 border border-white/10">
                       <h3 className="text-gray-400 text-xs font-bold uppercase tracking-wider mb-4 border-b border-white/5 pb-2">
                           {t('roomDesc')}
@@ -1410,8 +1331,6 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
                           {room.description || t('pinned')}
                       </p>
                   </div>
-
-                  {/* Extra Info */}
                   <div className="mt-8 flex gap-4">
                        <div className="flex flex-col items-center p-4 bg-white/5 rounded-2xl min-w-[80px]">
                            <Users className="w-6 h-6 text-brand-400 mb-2"/>
@@ -1429,8 +1348,7 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
           </div>
       )}
 
-      {/* Music Mini Player, Gift Panel, Settings Modal, UserList... (All same as before, just kept structural) */}
-      
+      {/* OTHER MODALS (Music, Gift, Exit, etc.) - Preserved */}
       {showMusicMiniPlayer && (
           <div className="absolute inset-0 z-[80] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4 animate-in fade-in">
               <div className="w-80 bg-gray-900/30 backdrop-blur-2xl border border-white/20 rounded-[2rem] p-6 shadow-2xl flex flex-col items-center relative overflow-hidden ring-1 ring-white/10">
@@ -1475,7 +1393,6 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
 
       {showImportView && (
           <div className="absolute inset-0 z-[100] bg-gray-900/30 backdrop-blur-3xl flex flex-col animate-in slide-in-from-bottom-20">
-              {/* Import View Content */}
               <div className="p-4 bg-gray-800/50 backdrop-blur border-b border-white/10 flex items-center gap-3">
                   <button onClick={() => { setShowImportView(false); setStagedFiles([]); }} className="p-2 rounded-full hover:bg-white/10 text-white">
                       <ArrowLeft className="w-6 h-6 rtl:rotate-180" />

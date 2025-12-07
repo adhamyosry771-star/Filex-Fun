@@ -45,7 +45,7 @@ import {
 } from '../types';
 
 // --- Helper to Sanitize Data for Firestore ---
-// CRITICAL FIX: Ensure NO undefined values are passed to Firestore
+// Ensure NO undefined values are passed to Firestore
 const sanitizeSeat = (seat: any): RoomSeat => ({
     index: Number(seat.index),
     userId: seat.userId || null, 
@@ -110,6 +110,8 @@ export const createUserProfile = async (uid: string, data: Partial<User>) => {
     isAdmin: false,
     adminRole: null,
     canCreateRoom: false, // Default: creating rooms is locked
+    dailyProfit: 0,
+    lastDailyReset: Date.now(),
     ...data
   };
   await setDoc(doc(db, 'users', uid), userData);
@@ -289,6 +291,19 @@ export const toggleRoomOfficialStatus = async (roomId: string, isOfficial: boole
   await updateDoc(doc(db, 'rooms', roomId), { isOfficial });
 };
 
+export const updateRoomGameConfig = async (roomId: string, luck: number, mode: 'FAIR' | 'DRAIN' | 'HOOK', hookThreshold: number) => {
+  await updateDoc(doc(db, 'rooms', roomId), { 
+      gameLuck: luck,
+      gameMode: mode,
+      hookThreshold: hookThreshold
+  });
+};
+
+// Deprecated in UI but kept for compatibility - redirects to full config update
+export const setRoomLuck = async (roomId: string, luckPercentage: number) => {
+  await updateDoc(doc(db, 'rooms', roomId), { gameLuck: luckPercentage });
+};
+
 export const sendSystemNotification = async (uid: string, title: string, body: string) => {
   const notif: Notification = {
     id: Date.now().toString(),
@@ -363,7 +378,10 @@ export const createRoom = async (title: string, thumbnail: string, host: User, h
         contributors: {},
         cupStartTime: Date.now(), 
         bannedUsers: {},
-        admins: []
+        admins: [],
+        gameLuck: 50, // Default fair luck
+        gameMode: 'FAIR', // Default mode
+        hookThreshold: 50000 // Default hook threshold
     };
     await setDoc(roomRef, newRoom);
     return newRoom;
@@ -724,7 +742,38 @@ export const purchaseStoreItem = async (uid: string, item: StoreItem, currentUse
     await batch.commit();
 };
 
-// --- Wallet & Exchange ---
+// --- Wallet & Exchange & Games ---
+export const updateWalletForGame = async (uid: string, amount: number) => {
+    // Amount can be negative (bet) or positive (winnings)
+    const userRef = doc(db, 'users', uid);
+    
+    await runTransaction(db, async (transaction) => {
+        const userDoc = await transaction.get(userRef);
+        if (!userDoc.exists()) return;
+        
+        const userData = userDoc.data() as User;
+        let dailyProfit = userData.dailyProfit || 0;
+        const lastReset = userData.lastDailyReset || 0;
+        const now = Date.now();
+        
+        // Reset daily profit if 24h passed
+        if (now - lastReset > 24 * 60 * 60 * 1000) {
+            dailyProfit = 0;
+            transaction.update(userRef, { lastDailyReset: now });
+        }
+        
+        // If amount is positive (win), add to dailyProfit
+        if (amount > 0) {
+            dailyProfit += amount;
+        }
+        
+        transaction.update(userRef, {
+            'wallet.diamonds': increment(amount),
+            dailyProfit: dailyProfit
+        });
+    });
+};
+
 export const exchangeCoinsToDiamonds = async (uid: string, amount: number) => {
     if (amount <= 0) return;
     const userRef = doc(db, 'users', uid);

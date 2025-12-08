@@ -198,12 +198,11 @@ export interface Gift {
 
 export interface StoreItem {
   id: string;
-  type: 'frame' | 'bubble' | 'entrance';
+  type: 'frame' | 'bubble';
   name: { ar: string, en: string };
   price: number;
   currency: 'diamonds' | 'coins';
   previewClass: string;
-  videoUrl?: string;
 }
 
 export interface VipTier {

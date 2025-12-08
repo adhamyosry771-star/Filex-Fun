@@ -770,21 +770,6 @@ export const purchaseStoreItem = async (uid: string, item: StoreItem, currentUse
     await batch.commit();
 };
 
-// --- Store Management ---
-export const addStoreItem = async (item: StoreItem) => {
-  await setDoc(doc(db, 'store', item.id), item);
-};
-
-export const getStoreItems = async (): Promise<StoreItem[]> => {
-  const colRef = collection(db, 'store');
-  const snap = await getDocs(colRef);
-  return snap.docs.map(d => d.data() as StoreItem);
-};
-
-export const deleteStoreItem = async (itemId: string) => {
-  await deleteDoc(doc(db, 'store', itemId));
-};
-
 // --- Wallet & Exchange & Games ---
 export const updateWalletForGame = async (uid: string, amount: number) => {
     // Amount can be negative (bet) or positive (winnings)

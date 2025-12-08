@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef, memo } from 'react';
 import { X, Gamepad2, Coins } from 'lucide-react';
 import { User, Language, Room } from '../types';
@@ -92,15 +93,9 @@ export const FruitWarGame: React.FC<FruitWarGameProps> = ({ room, currentUser, l
     // BATCHING REFS
     const pendingBetDeduction = useRef(0);
     const fwBetsRef = useRef<Record<number, number>>({});
-    
-    // IMPORTANT: Keep a live ref to the room object to ensure we read the latest configs during spin without re-renders
-    const roomRef = useRef<Room>(room);
 
     // Sync Ref
     useEffect(() => { fwBetsRef.current = fwBets; }, [fwBets]);
-    
-    // Update room ref whenever prop changes
-    useEffect(() => { roomRef.current = room; }, [room]);
 
     const t = (key: string) => {
         const dict: Record<string, { ar: string, en: string }> = {
@@ -131,11 +126,13 @@ export const FruitWarGame: React.FC<FruitWarGameProps> = ({ room, currentUser, l
                 }
             } catch (e) {
                 console.error("Failed to sync bets to server", e);
+                // Optional: We could rollback, but for games it's better to keep moving
+                // or show an error. Here we assume success or user will retry.
             }
         }
     };
 
-    // Flush bets periodically
+    // Flush bets periodically (every 2 seconds) to avoid spamming Firestore
     useEffect(() => {
         const interval = setInterval(flushPendingBets, 2000);
         return () => {
@@ -174,11 +171,9 @@ export const FruitWarGame: React.FC<FruitWarGameProps> = ({ room, currentUser, l
     const startFruitSpin = () => {
         let currentIdx = fwHighlight;
         
-        // --- RIGGING LOGIC (USING LIVE REF) ---
-        const currentRoom = roomRef.current;
-        const mode = currentRoom.gameMode || 'FAIR';
-        const luck = currentRoom.gameLuck !== undefined ? currentRoom.gameLuck : 50;
-        
+        // --- RIGGING LOGIC ---
+        const mode = room.gameMode || 'FAIR';
+        const luck = room.gameLuck !== undefined ? room.gameLuck : 50;
         let winnerIndex = -1;
 
         const userBets = fwBetsRef.current;
@@ -187,71 +182,34 @@ export const FruitWarGame: React.FC<FruitWarGameProps> = ({ room, currentUser, l
         const safeIndices = allIndices.filter(i => !betIndices.includes(i));
         const winningIndices = betIndices;
 
-        if (betIndices.length === 0) {
-            // No bets, truly random
-            winnerIndex = Math.floor(Math.random() * 8);
+        if (mode === 'DRAIN') {
+            if (betIndices.length > 0 && safeIndices.length > 0 && Math.random() < 0.9) {
+                winnerIndex = safeIndices[Math.floor(Math.random() * safeIndices.length)];
+            } else {
+                winnerIndex = Math.floor(Math.random() * 8);
+            }
+        } else if (mode === 'HOOK') {
+            const currentDailyProfit = currentUser.dailyProfit || 0;
+            const threshold = room.hookThreshold || 50000;
+            if (currentDailyProfit >= threshold) {
+                if (betIndices.length > 0 && safeIndices.length > 0) winnerIndex = safeIndices[Math.floor(Math.random() * safeIndices.length)];
+                else winnerIndex = Math.floor(Math.random() * 8);
+            } else {
+                if (betIndices.length > 0 && Math.random() < 0.8) winnerIndex = winningIndices[Math.floor(Math.random() * winningIndices.length)];
+                else winnerIndex = Math.floor(Math.random() * 8);
+            }
         } else {
-            // Determine fate based on Mode
-            if (mode === 'DRAIN') {
-                // Aggressively try to make user lose
-                // If there are safe indices, 90% chance to pick one of them
-                if (safeIndices.length > 0 && Math.random() < 0.9) {
-                    winnerIndex = safeIndices[Math.floor(Math.random() * safeIndices.length)];
-                } else {
-                    winnerIndex = Math.floor(Math.random() * 8);
-                }
-            } 
-            else if (mode === 'HOOK') {
-                // Smart mode: Let them win a little, but cap it based on daily profit
-                const currentDailyProfit = currentUser.dailyProfit || 0;
-                const threshold = currentRoom.hookThreshold || 50000;
-                
-                if (currentDailyProfit >= threshold) {
-                    // User made too much, DRAIN mode activated
-                    if (safeIndices.length > 0) winnerIndex = safeIndices[Math.floor(Math.random() * safeIndices.length)];
-                    else winnerIndex = Math.floor(Math.random() * 8);
-                } else {
-                    // Hook mode: Give them a win (80% chance if they bet on something)
-                    if (Math.random() < 0.8) {
-                        winnerIndex = winningIndices[Math.floor(Math.random() * winningIndices.length)];
-                    } else {
-                        winnerIndex = Math.floor(Math.random() * 8); // Chance to lose
-                    }
-                }
-            } 
-            else {
-                // FAIR MODE (Default)
-                // Use 'luck' slider: 0 = Lose always, 100 = Win always (if possible)
-                // Random roll 0-100
-                const roll = Math.random() * 100;
-                
-                // If Luck is HIGH (e.g., 90), we want user to WIN.
-                // So if roll < luck (90% chance), we try to pick a winning index.
-                
-                if (roll <= luck) {
-                    // Try to Win
-                    if (winningIndices.length > 0) {
-                        winnerIndex = winningIndices[Math.floor(Math.random() * winningIndices.length)];
-                    } else {
-                        winnerIndex = Math.floor(Math.random() * 8);
-                    }
-                } else {
-                    // Try to Lose
-                    if (safeIndices.length > 0) {
-                        winnerIndex = safeIndices[Math.floor(Math.random() * safeIndices.length)];
-                    } else {
-                        winnerIndex = Math.floor(Math.random() * 8);
-                    }
-                }
+            // FAIR
+            const roll = Math.random() * 100;
+            if (betIndices.length > 0 && roll > luck && safeIndices.length > 0) {
+                winnerIndex = safeIndices[Math.floor(Math.random() * safeIndices.length)];
+            } else {
+                winnerIndex = Math.floor(Math.random() * 8);
             }
         }
+        if (winnerIndex === -1) winnerIndex = Math.floor(Math.random() * 8);
 
-        // Fallback safety
-        if (winnerIndex === -1 || winnerIndex === undefined) {
-            winnerIndex = Math.floor(Math.random() * 8);
-        }
-
-        // Animation Logic
+        // Animation
         const rounds = 4;
         const totalSteps = (rounds * 8) + ((winnerIndex - currentIdx + 8) % 8);
         let step = 0;

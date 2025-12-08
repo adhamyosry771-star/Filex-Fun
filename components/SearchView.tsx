@@ -1,6 +1,5 @@
-
 import React, { useState } from 'react';
-import { ArrowLeft, Search, UserPlus, Check } from 'lucide-react';
+import { ArrowLeft, Search, UserPlus, Check, Clock } from 'lucide-react';
 import { Language, User } from '../types';
 import { searchUserByDisplayId, sendFriendRequest } from '../services/firebaseService';
 import { auth } from '../firebaseConfig';
@@ -9,9 +8,10 @@ interface SearchViewProps {
   language: Language;
   onBack: () => void;
   currentUser: User;
+  onOpenFullProfile?: (user: User) => void;
 }
 
-const SearchView: React.FC<SearchViewProps> = ({ language, onBack, currentUser }) => {
+const SearchView: React.FC<SearchViewProps> = ({ language, onBack, currentUser, onOpenFullProfile }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<User | null>(null);
@@ -23,7 +23,7 @@ const SearchView: React.FC<SearchViewProps> = ({ language, onBack, currentUser }
       placeholder: { ar: 'أدخل المعرف (ID)', en: 'Enter User ID' },
       find: { ar: 'بحث', en: 'Search' },
       notFound: { ar: 'لم يتم العثور على المستخدم', en: 'User not found' },
-      add: { ar: 'متابعة', en: 'Follow' },
+      add: { ar: 'إضافة صديق', en: 'Add Friend' },
       sent: { ar: 'تم الإرسال', en: 'Sent' },
       self: { ar: 'هذا أنت!', en: 'That\'s you!' }
     };
@@ -51,6 +51,12 @@ const SearchView: React.FC<SearchViewProps> = ({ language, onBack, currentUser }
           alert("Failed to send request");
       }
       setLoading(false);
+  };
+
+  const handleAvatarClick = () => {
+      if (result && onOpenFullProfile) {
+          onOpenFullProfile(result);
+      }
   };
 
   return (
@@ -83,18 +89,22 @@ const SearchView: React.FC<SearchViewProps> = ({ language, onBack, currentUser }
 
           {result ? (
               <div className="bg-gray-800 rounded-2xl p-6 flex flex-col items-center animate-in zoom-in">
-                  <img src={result.avatar} className="w-24 h-24 rounded-full border-4 border-brand-500 mb-4 object-cover" />
+                  <img 
+                    src={result.avatar} 
+                    onClick={handleAvatarClick}
+                    className="w-24 h-24 rounded-full border-4 border-brand-500 mb-4 object-cover cursor-pointer hover:opacity-80 transition" 
+                  />
                   <h2 className="text-xl font-bold mb-1">{result.name}</h2>
                   <p className="text-gray-400 text-sm mb-4">ID: {result.id}</p>
                   
                   {result.uid === currentUser.uid ? (
                       <span className="text-brand-400 font-bold">{t('self')}</span>
                   ) : requestSent ? (
-                      <button disabled className="px-8 py-2 bg-green-600/20 text-green-500 rounded-full font-bold flex items-center gap-2">
-                          <Check className="w-4 h-4" /> {t('sent')}
+                      <button disabled className="px-8 py-2 bg-gray-700 text-gray-400 rounded-full font-bold flex items-center gap-2 cursor-default border border-gray-600">
+                          <Clock className="w-4 h-4" /> {t('sent')}
                       </button>
                   ) : (
-                      <button onClick={handleSendRequest} className="px-8 py-2 bg-gradient-to-r from-brand-600 to-accent-600 rounded-full font-bold text-white flex items-center gap-2 shadow-lg hover:scale-105 transition">
+                      <button onClick={handleSendRequest} className="px-8 py-2 bg-gradient-to-r from-emerald-500 to-teal-500 rounded-full font-bold text-white flex items-center gap-2 shadow-lg hover:scale-105 transition shadow-emerald-500/20">
                           <UserPlus className="w-4 h-4" /> {t('add')}
                       </button>
                   )}

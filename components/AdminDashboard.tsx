@@ -1,7 +1,6 @@
-
 import React, { useState, useEffect } from 'react';
-import { Shield, Trash2, Ban, Search, Gift, Crown, ArrowLeft, RefreshCw, CheckCircle, Megaphone, Edit3, Send, Home, XCircle, Flame, Image as ImageIcon, Plus, X, Database, Clock, Gamepad2, BadgeCheck, Coins, Trophy, Ghost, Lock, Unlock, Percent, AlertTriangle } from 'lucide-react';
-import { getAllUsers, adminUpdateUser, deleteAllRooms, sendSystemNotification, broadcastOfficialMessage, searchUserByDisplayId, getRoomsByHostId, adminBanRoom, deleteRoom, toggleRoomHotStatus, toggleRoomActivitiesStatus, addBanner, deleteBanner, listenToBanners, syncRoomIdsWithUserIds, toggleRoomOfficialStatus, resetAllUsersCoins, resetAllRoomCups, resetAllGhostUsers, updateRoomGameConfig } from '../services/firebaseService';
+import { Shield, Trash2, Ban, Search, Gift, Crown, ArrowLeft, RefreshCw, CheckCircle, Megaphone, Edit3, Send, Home, XCircle, Flame, Image as ImageIcon, Plus, X, Database, Clock, Gamepad2, BadgeCheck, Coins, Trophy, Ghost, Lock, Unlock, Percent, AlertTriangle, MessageCircle } from 'lucide-react';
+import { getAllUsers, adminUpdateUser, deleteAllRooms, sendSystemNotification, broadcastOfficialMessage, searchUserByDisplayId, getRoomsByHostId, adminBanRoom, deleteRoom, toggleRoomHotStatus, toggleRoomActivitiesStatus, addBanner, deleteBanner, listenToBanners, syncRoomIdsWithUserIds, toggleRoomOfficialStatus, resetAllUsersCoins, resetAllRoomCups, resetAllGhostUsers, updateRoomGameConfig, resetAllChats, deleteUserProfile } from '../services/firebaseService';
 import { Language, User, Room, Banner } from '../types';
 import { VIP_TIERS, ADMIN_ROLES } from '../constants';
 
@@ -165,6 +164,25 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, language }) => 
           alert(!currentStatus ? "تم تفعيل خاصية إنشاء الغرف" : "تم إلغاء خاصية إنشاء الغرف");
       } catch (e) {
           alert("فشل التحديث");
+      }
+      setActionLoading(null);
+  };
+
+  const handleDeleteUser = async (uid: string) => {
+      if (!confirm("هل أنت متأكد من حذف هذا المستخدم نهائياً؟")) return;
+      setActionLoading(uid);
+      try {
+          await deleteUserProfile(uid);
+          // If the deleted user was the one being searched
+          if (searchedUser && searchedUser.uid === uid) {
+              setSearchedUser(null);
+              setSearchedRooms([]);
+          }
+          await fetchUsers();
+          alert("تم حذف المستخدم بنجاح.");
+      } catch (e) {
+          alert("فشل حذف المستخدم.");
+          console.error(e);
       }
       setActionLoading(null);
   };
@@ -452,13 +470,26 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, language }) => 
   };
 
   const handleResetGhostUsers = async () => {
-      if (!confirm("هل أنت متأكد من تنظيف جميع الحسابات المعلقة؟ سيتم إخراج جميع المستخدمين من المايكات وتصفير عداد المتصلين في كل الرومات.")) return;
+      if (!confirm("هل أنت متأكد من تنظيف جميع الحسابات المعلقة؟ سيتم إخراج جميع المستخدمين من المايكات وتصفير عداد المتصلين وإزالة المتواجدين في كل الرومات.")) return;
       setActionLoading('reset_ghosts');
       try {
           await resetAllGhostUsers();
           alert("تم تنظيف الحسابات المعلقة بنجاح!");
       } catch (e) {
           alert("حدث خطأ أثناء التنظيف");
+      }
+      setActionLoading(null);
+  };
+
+  const handleResetChats = async () => {
+      if (!confirm("⚠️ تحذير: هل أنت متأكد من حذف جميع المحادثات الخاصة لجميع المستخدمين؟ هذا الإجراء لا يمكن التراجع عنه.")) return;
+      setActionLoading('reset_chats');
+      try {
+          await resetAllChats();
+          alert("تم تصفير جميع المحادثات بنجاح!");
+      } catch (e) {
+          alert("حدث خطأ أثناء التصفير");
+          console.error(e);
       }
       setActionLoading(null);
   };
@@ -628,6 +659,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, language }) => 
                                           <div>
                                               <div className="font-bold text-white text-lg">{searchedUser.name}</div>
                                               <div className="text-xs text-gray-500">ID: {searchedUser.id}</div>
+                                              <div className="text-[10px] text-gray-400">{searchedUser.email || 'No Email'}</div>
                                           </div>
                                           {searchedUser.isBanned && <span className="mr-auto bg-red-600 text-white text-[10px] px-2 py-1 rounded font-bold">محظور</span>}
                                           {searchedUser.isAgent && <span className="mr-auto bg-blue-600 text-white text-[10px] px-2 py-1 rounded font-bold flex items-center gap-1"><Database className="w-3 h-3"/> وكيل</span>}
@@ -682,6 +714,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, language }) => 
                                            <button onClick={() => handleSetAdminRole(searchedUser.uid!, 'official_manager')} className="bg-cyan-500/10 text-cyan-500 border border-cyan-500/30 text-[10px] py-1 rounded hover:bg-cyan-500/20">المدير الرسمي</button>
                                            <button onClick={() => handleSetAdminRole(searchedUser.uid!, 'me_manager')} className="bg-emerald-500/10 text-emerald-500 border border-emerald-500/30 text-[10px] py-1 rounded hover:bg-emerald-500/20">مدير الشرق</button>
                                            <button onClick={() => handleSetAdminRole(searchedUser.uid!, null)} className="col-span-2 bg-gray-700 text-gray-400 text-[10px] py-1 rounded hover:bg-gray-600">إزالة الرتبة</button>
+                                           <button onClick={() => handleDeleteUser(searchedUser.uid!)} className="col-span-2 bg-red-950 text-red-500 border border-red-900 text-[10px] py-1 rounded hover:bg-red-900 flex items-center justify-center gap-1 mt-1"><Trash2 className="w-3 h-3"/> حذف المستخدم نهائياً</button>
                                       </div>
                                   </div>
                               ) : <div className="text-gray-500 p-4">لم يتم العثور على مستخدم</div>}
@@ -794,7 +827,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, language }) => 
                                           <span className={`font-bold text-sm ${user.isAdmin ? 'text-red-400' : 'text-white'}`}>{user.name}</span>
                                           {user.vip && <span className="text-[9px] bg-gold-500 text-black px-1 rounded font-bold">V{user.vipLevel}</span>}
                                           {user.adminRole && (
-                                              <span className={`text-[8px] px-1 rounded border ${
+                                              <span className={`text-[8px] px-1.5 py-0.5 rounded border ${
                                                   user.adminRole === 'super_admin' ? 'border-red-500 text-red-500' : 
                                                   user.adminRole === 'admin' ? 'border-yellow-500 text-yellow-500' :
                                                   user.adminRole === 'official_manager' ? 'border-cyan-500 text-cyan-500' :
@@ -806,6 +839,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, language }) => 
                                           {user.isAgent && <span className="text-[8px] bg-blue-600 text-white px-1 rounded font-bold">وكيل</span>}
                                       </div>
                                       <div className="text-[10px] text-gray-500 font-mono">ID: {user.id}</div>
+                                      <div className="text-[10px] text-gray-400">{user.email || 'No Email'}</div>
                                       <div className="text-[10px] text-cyan-400 font-bold">💎 {user.wallet?.diamonds || 0}</div>
                                   </div>
                               </div>
@@ -816,6 +850,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, language }) => 
                                   <button onClick={() => initiateBanAction(user)} disabled={user.isAdmin} className={`p-1.5 rounded ${user.isBanned ? 'bg-green-900/30 text-green-400' : 'bg-red-900/30 text-red-400'}`}>
                                       {user.isBanned ? <CheckCircle className="w-4 h-4" /> : <Ban className="w-4 h-4" />}
                                   </button>
+                                  <button onClick={() => handleDeleteUser(user.uid)} disabled={user.isAdmin} className="p-1.5 rounded bg-red-950/50 text-red-500 hover:bg-red-900"><Trash2 className="w-4 h-4"/></button>
                               </div>
                           </div>
                       </div>
@@ -966,6 +1001,12 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, language }) => 
                       <button onClick={handleResetAllCups} disabled={actionLoading === 'reset_cups'} className="w-full bg-yellow-600 hover:bg-yellow-700 text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2">
                           <Trophy className="w-5 h-5"/>
                           {actionLoading === 'reset_cups' ? 'جاري التصفير...' : 'تصفير الكأس للجميع'}
+                      </button>
+
+                      {/* New Button for Resetting Chats */}
+                      <button onClick={handleResetChats} disabled={actionLoading === 'reset_chats'} className="w-full bg-gray-600 hover:bg-gray-700 text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2 border border-gray-500">
+                          <MessageCircle className="w-5 h-5"/>
+                          {actionLoading === 'reset_chats' ? 'جاري التصفير...' : 'تصفير جميع المحادثات'}
                       </button>
                   </div>
               </div>

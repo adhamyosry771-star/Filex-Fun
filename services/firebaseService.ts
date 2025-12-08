@@ -1,4 +1,3 @@
-
 import { 
   collection, 
   query, 
@@ -91,6 +90,7 @@ export const createUserProfile = async (uid: string, data: Partial<User>) => {
     uid,
     id: displayId,
     name: data.name || 'User',
+    email: data.email || undefined, // Save Email
     avatar: data.avatar || '',
     level: 1,
     diamondsSpent: 0,
@@ -123,6 +123,17 @@ export const updateUserProfile = async (uid: string, data: Partial<User>) => {
   // Filter out undefined values
   const cleanData = JSON.parse(JSON.stringify(data));
   await updateDoc(docRef, cleanData);
+};
+
+// New Function: Delete User Profile completely
+export const deleteUserProfile = async (uid: string) => {
+    // 1. Delete the user document
+    await deleteDoc(doc(db, 'users', uid));
+    
+    // Note: We cannot delete the Auth record from client SDK without Admin SDK.
+    // However, deleting the profile effectively removes them from the app.
+    // Upon next login attempt, they will be treated as a new user (onboarding) 
+    // or if we implement checks, we can block recreation.
 };
 
 export const listenToUserProfile = (uid: string, callback: (user: User | null) => void): Unsubscribe => {
@@ -210,6 +221,21 @@ export const getUserList = async (uid: string, type: 'friends' | 'followers' | '
     }
     
     return list;
+};
+
+// Check Friendship Status
+export const checkFriendshipStatus = async (myUid: string, targetUid: string): Promise<'friends' | 'sent' | 'none'> => {
+    if (!myUid || !targetUid) return 'none';
+    
+    // 1. Check if already friends
+    const friendDoc = await getDoc(doc(db, `users/${myUid}/friends`, targetUid));
+    if (friendDoc.exists()) return 'friends';
+
+    // 2. Check if request sent
+    const reqDoc = await getDoc(doc(db, `users/${targetUid}/friendRequests`, myUid));
+    if (reqDoc.exists()) return 'sent';
+
+    return 'none';
 };
 
 // --- Admin ---
@@ -354,6 +380,7 @@ export const createRoom = async (title: string, thumbnail: string, host: User, h
         hostId: host.id, 
         viewerCount: 0,
         thumbnail,
+        backgroundImage: '', // Ensure field exists
         tags: [],
         isAiHost: false,
         seatCount: initialSeatCount,
@@ -1061,5 +1088,44 @@ export const sendGiftTransaction = async (roomId: string, senderUid: string, tar
             if (giftId) updates[`receivedGifts.${giftId}`] = increment(1);
             await updateDoc(recipientDoc.ref, updates);
         }
+    }
+};
+
+export const resetAllChats = async () => {
+    try {
+        const usersSnap = await getDocs(collection(db, 'users'));
+        const chatIds = new Set<string>();
+
+        // 1. Delete all chat summaries from users profiles
+        for (const userDoc of usersSnap.docs) {
+            const chatsRef = collection(db, `users/${userDoc.id}/chats`);
+            const chatsSnap = await getDocs(chatsRef);
+            
+            if (!chatsSnap.empty) {
+                const batch = writeBatch(db);
+                chatsSnap.forEach((doc) => {
+                    batch.delete(doc.ref);
+                    chatIds.add(doc.id);
+                });
+                await batch.commit();
+            }
+        }
+
+        // 2. Delete all messages from private_messages collection
+        for (const chatId of chatIds) {
+            const messagesRef = collection(db, `private_messages/${chatId}/messages`);
+            const messagesSnap = await getDocs(messagesRef);
+            
+            if (!messagesSnap.empty) {
+                const batch = writeBatch(db);
+                messagesSnap.forEach((doc) => {
+                    batch.delete(doc.ref);
+                });
+                await batch.commit();
+            }
+        }
+    } catch (e) {
+        console.error("Failed to reset chats:", e);
+        throw e;
     }
 };

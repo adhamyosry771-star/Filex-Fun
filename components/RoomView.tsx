@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef, memo } from 'react';
 import { ArrowLeft, Send, Heart, Share2, Gift as GiftIcon, Users, Crown, Mic, MicOff, Lock, Unlock, Settings, Image as ImageIcon, X, Info, Minimize2, LogOut, BadgeCheck, Loader2, Upload, Shield, Trophy, Bot, Volume2, VolumeX, ArrowDownCircle, Ban, Trash2, UserCog, UserMinus, Zap, BarChart3, Gamepad2, Clock, LayoutGrid, ListMusic, Plus, Check, Search, Circle, CheckCircle2, KeyRound, MoreVertical, Grid, Sprout, Car, RotateCw, Coins, History, Hand, Hexagon, Play, Pause, SkipForward, SkipBack, Music, Flag } from 'lucide-react';
 import { Room, ChatMessage, Gift, Language, User, RoomSeat } from '../types';
@@ -26,9 +25,10 @@ interface SeatItemProps {
     isLoading: boolean;
     onClick: (index: number, userId: string | null) => void;
     isHostSeat?: boolean;
+    isRoomAdmin?: boolean; // New Prop to show badge
 }
 
-const SeatItem = memo(({ seat, isSpeaking, isLoading, onClick, isHostSeat }: SeatItemProps) => {
+const SeatItem = memo(({ seat, isSpeaking, isLoading, onClick, isHostSeat, isRoomAdmin }: SeatItemProps) => {
     const sizeClass = isHostSeat ? "w-16 h-16" : "w-[50px] h-[50px]";
     const frameClass = seat.userId ? getFrameClass(seat.frameId) : 'border-2 border-white/20 border-dashed';
     
@@ -55,6 +55,7 @@ const SeatItem = memo(({ seat, isSpeaking, isLoading, onClick, isHostSeat }: Sea
                         )}
                         {seat.isMuted && <div className="absolute inset-0 rounded-full bg-black/50 flex items-center justify-center z-20"><MicOff className={`${isHostSeat ? 'w-4 h-4' : 'w-3 h-3'} text-red-500`}/></div>}
                         {isHostSeat && <div className="absolute -top-3 -right-1 bg-yellow-500 p-1 rounded-full z-20"><Crown className="w-2.5 h-2.5 text-black" /></div>}
+                        {!isHostSeat && isRoomAdmin && <div className="absolute -top-2 -right-1 bg-blue-600 p-1 rounded-full z-20 shadow-sm border border-blue-400"><Shield className="w-2 h-2 text-white fill-blue-300" /></div>}
                     </>
                 ) : (
                     isHostSeat ? <div className="text-gray-400 text-[10px] text-center">Host</div> 
@@ -86,7 +87,8 @@ const SeatItem = memo(({ seat, isSpeaking, isLoading, onClick, isHostSeat }: Sea
         prev.seat.frameId === next.seat.frameId &&
         prev.seat.vipLevel === next.seat.vipLevel && 
         prev.isSpeaking === next.isSpeaking &&
-        prev.isLoading === next.isLoading
+        prev.isLoading === next.isLoading &&
+        prev.isRoomAdmin === next.isRoomAdmin // Check prop change
     );
 });
 
@@ -665,6 +667,7 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
                     isLoading={loadingSeatIndex === seat.index}
                     onClick={handleSeatClick}
                     isHostSeat={true}
+                    isRoomAdmin={room.admins?.includes(seat.userId || '')}
                  />
              ))}
           </div>
@@ -677,6 +680,7 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
                     isSpeaking={seat.userId && speakingUsers.has(seat.userId) || false}
                     isLoading={loadingSeatIndex === seat.index}
                     onClick={handleSeatClick}
+                    isRoomAdmin={room.admins?.includes(seat.userId || '')}
                  />
              ))}
           </div>
@@ -1436,5 +1440,3 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
     </div>
   );
 };
-
-export default RoomView;

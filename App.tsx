@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { Home, Trophy, User as UserIcon, Users, PlusCircle, Copy, MessageSquare, Loader2, ChevronRight, Crown, ShoppingBag, Wallet as WalletIcon, Settings, Gem, Coins, Edit3, Zap, X, Trash2, Shield, Info, Smartphone, Star, Gamepad2, BadgeCheck, Database, PenBox, Globe, Calendar, Mars, Venus } from 'lucide-react';
 import HomeView from './components/HomeView';
@@ -17,7 +16,8 @@ import SearchView from './components/SearchView';
 import PrivateChatView from './components/PrivateChatView';
 import AgencyView from './components/AgencyView';
 import EditProfileModal from './components/EditProfileModal';
-import UserListModal from './components/UserListModal'; // New Import
+import UserListModal from './components/UserListModal'; 
+import FullProfileView from './components/FullProfileView'; // Added Import
 import { ViewState, Room, User, Language, PrivateChatSummary } from './types';
 import { auth } from './firebaseConfig';
 import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
@@ -44,6 +44,9 @@ const App: React.FC = () => {
 
   // New State for List Modal (Friends, Followers, etc.)
   const [listModalType, setListModalType] = useState<'friends' | 'followers' | 'following' | 'visitors' | null>(null);
+  
+  // Full Profile State for Search View
+  const [fullProfileUser, setFullProfileUser] = useState<User | null>(null);
 
   const [activeChat, setActiveChat] = useState<PrivateChatSummary | null>(null);
   
@@ -81,6 +84,7 @@ const App: React.FC = () => {
         // Listen Profile
         profileUnsubscribe = listenToUserProfile(user.uid, async (profile) => {
             if (profile) {
+                 // Check if banned
                  if (profile.isBanned) {
                     if (!profile.isPermanentBan && profile.banExpiresAt && profile.banExpiresAt < Date.now()) {
                         await adminUpdateUser(user.uid, { isBanned: false, banExpiresAt: 0, isPermanentBan: false });
@@ -98,6 +102,12 @@ const App: React.FC = () => {
                         return;
                     }
                 }
+
+                // Sync Email if missing
+                if (!profile.email && user.email) {
+                    await updateUserProfile(user.uid, { email: user.email });
+                }
+
                 setUserProfile(profile);
                 setIsOnboarding(false);
             } else {
@@ -158,6 +168,7 @@ const App: React.FC = () => {
     try {
         await createUserProfile(authUser.uid, {
             name: data.name,
+            email: authUser.email || undefined, // Save Email on creation
             country: data.country,
             age: parseInt(data.age),
             gender: data.gender,
@@ -193,6 +204,13 @@ const App: React.FC = () => {
   };
 
   const handleJoinRoom = async (room: Room) => {
+    if (userProfile && userProfile.uid && room.bannedUsers && room.bannedUsers[userProfile.uid]) {
+        const expiry = room.bannedUsers[userProfile.uid];
+        if (expiry === -1 || expiry > Date.now()) {
+            alert(language === 'ar' ? 'لقد تم طردك من الغرفة' : 'You are banned from entering this room');
+            return;
+        }
+    }
     setActiveRoom(room);
     setMinimizedRoom(null); 
     setCurrentView(ViewState.ROOM);
@@ -334,7 +352,14 @@ const App: React.FC = () => {
         return null; // Rendered in main wrapper
       
       case ViewState.SEARCH:
-        return userProfile ? <SearchView language={language} onBack={() => setCurrentView(ViewState.HOME)} currentUser={userProfile} /> : <div />;
+        return userProfile ? (
+            <SearchView 
+                language={language} 
+                onBack={() => setCurrentView(ViewState.HOME)} 
+                currentUser={userProfile} 
+                onOpenFullProfile={(u) => setFullProfileUser(u)}
+            />
+        ) : <div />;
       
       case ViewState.GAMES:
         return userProfile ? <GamesView language={language} onBack={() => setCurrentView(ViewState.HOME)} user={userProfile} /> : <div />;
@@ -629,6 +654,14 @@ const App: React.FC = () => {
                     type={listModalType}
                     userId={userProfile.uid!}
                     onClose={() => setListModalType(null)}
+                    language={language}
+                />
+            )}
+
+            {fullProfileUser && (
+                <FullProfileView 
+                    user={fullProfileUser}
+                    onClose={() => setFullProfileUser(null)}
                     language={language}
                 />
             )}

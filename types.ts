@@ -1,4 +1,3 @@
-
 export enum ViewState {
   HOME = 'HOME',
   ROOM = 'ROOM',
@@ -48,6 +47,7 @@ export interface User {
   uid?: string;
   id: string;
   name: string;
+  email?: string; // New field for user email
   avatar: string;
   level: number;
   diamondsSpent?: number;

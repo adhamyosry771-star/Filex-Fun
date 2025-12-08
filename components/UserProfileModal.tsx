@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { X, User as UserIcon, MessageSquare, Gift, BadgeCheck, Loader2, Shield, MicOff, Ban, UserCog, UserMinus, Maximize2, ArrowDownToLine, Globe, Calendar, Mars, Venus } from 'lucide-react';
+import { X, User as UserIcon, MessageSquare, Gift, BadgeCheck, Loader2, Shield, MicOff, Ban, UserCog, UserMinus, Maximize2, ArrowDownToLine, Globe, Calendar, Mars, Venus, UserPlus, Check, Clock } from 'lucide-react';
 import { User, Language, RoomSeat } from '../types';
-import { searchUserByDisplayId, getUserProfile } from '../services/firebaseService';
+import { searchUserByDisplayId, getUserProfile, checkFriendshipStatus, sendFriendRequest } from '../services/firebaseService';
 import { LEVEL_ICONS, CHARM_ICONS, ADMIN_ROLES } from '../constants';
 
 interface UserProfileModalProps {
@@ -22,6 +22,7 @@ interface UserProfileModalProps {
 const UserProfileModal: React.FC<UserProfileModalProps> = ({ user, currentUser, onClose, onMessage, onGift, onKickSeat, onBanUser, onMakeAdmin, onRemoveAdmin, onLeaveSeat, onOpenFullProfile, language }) => {
   const [fullProfile, setFullProfile] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [friendshipStatus, setFriendshipStatus] = useState<'friends' | 'sent' | 'none' | 'loading'>('loading');
 
   const initialUserName = 'name' in user ? user.name : user.userName;
   const initialUserAvatar = 'avatar' in user ? user.avatar : user.userAvatar;
@@ -32,28 +33,35 @@ const UserProfileModal: React.FC<UserProfileModalProps> = ({ user, currentUser, 
   useEffect(() => {
     const fetchFullProfile = async () => {
         setIsLoading(true);
+        let found: User | null = null;
+
         // If we already have the wallet/stats info in the passed prop, use it directly
         if ('wallet' in user && 'diamondsSpent' in user) {
             setFullProfile(user as User);
-            setIsLoading(false);
-            return;
-        }
-
-        if (targetId) {
+            found = user as User;
+        } else if (targetId) {
             // Try fetch by Display ID (RoomSeat usually stores Display ID)
-            let found = await searchUserByDisplayId(targetId);
+            found = await searchUserByDisplayId(targetId);
             
             // If not found, try UID (just in case)
             if (!found) {
                 found = await getUserProfile(targetId);
             }
-            
             if (found) setFullProfile(found);
         }
+        
         setIsLoading(false);
+
+        // Check Friendship Logic
+        if (found && found.uid && currentUser.uid && found.uid !== currentUser.uid) {
+            const status = await checkFriendshipStatus(currentUser.uid, found.uid);
+            setFriendshipStatus(status);
+        } else {
+            setFriendshipStatus('none');
+        }
     };
     fetchFullProfile();
-  }, [user, targetId]);
+  }, [user, targetId, currentUser.uid]);
 
   // Use fetched profile if available, else fallback to initial props
   const displayUser: any = fullProfile || user; // Cast to any to access potentially missing properties
@@ -85,6 +93,8 @@ const UserProfileModal: React.FC<UserProfileModalProps> = ({ user, currentUser, 
     const dict: Record<string, { ar: string, en: string }> = {
       message: { ar: 'مراسلة', en: 'Message' },
       gift: { ar: 'إهداء', en: 'Send Gift' },
+      addFriend: { ar: 'إضافة صديق', en: 'Add Friend' },
+      requestSent: { ar: 'تم الإرسال', en: 'Request Sent' },
       profile: { ar: 'الملف الشخصي', en: 'Profile' },
       loading: { ar: 'جاري التحميل...', en: 'Loading...' },
       kickSeat: { ar: 'طرد من المايك', en: 'Kick Seat' },
@@ -101,7 +111,6 @@ const UserProfileModal: React.FC<UserProfileModalProps> = ({ user, currentUser, 
           onOpenFullProfile(fullProfile);
       } else {
           // If profile not fully loaded yet, construct a temporary one
-          // This ensures the view opens even if data is partial
           const tempUser: any = {
               ...user,
               id: displayId,
@@ -111,6 +120,18 @@ const UserProfileModal: React.FC<UserProfileModalProps> = ({ user, currentUser, 
               receivedGifts: {} 
           };
           onOpenFullProfile(tempUser as User);
+      }
+  };
+
+  const handleAddFriend = async () => {
+      if (!currentUser.uid || !fullProfile?.uid) return;
+      setFriendshipStatus('loading');
+      try {
+          await sendFriendRequest(currentUser.uid, fullProfile.uid, currentUser.name, currentUser.avatar);
+          setFriendshipStatus('sent');
+      } catch (e) {
+          console.error("Failed to send request", e);
+          setFriendshipStatus('none');
       }
   };
 
@@ -221,13 +242,34 @@ const UserProfileModal: React.FC<UserProfileModalProps> = ({ user, currentUser, 
             {!isProfileMe && (
                 <div className="w-full mt-8 space-y-3">
                     <div className="flex gap-3">
-                        <button 
-                            onClick={onMessage}
-                            className="flex-1 py-3 bg-brand-600 rounded-xl text-white font-bold flex items-center justify-center gap-2 hover:bg-brand-500 transition shadow-lg shadow-brand-500/20"
-                        >
-                            <MessageSquare className="w-5 h-5" />
-                            {t('message')}
-                        </button>
+                        {/* Dynamic Action Button based on Friendship */}
+                        {friendshipStatus === 'friends' ? (
+                            <button 
+                                onClick={onMessage}
+                                className="flex-1 py-3 bg-brand-600 rounded-xl text-white font-bold flex items-center justify-center gap-2 hover:bg-brand-500 transition shadow-lg shadow-brand-500/20"
+                            >
+                                <MessageSquare className="w-5 h-5" />
+                                {t('message')}
+                            </button>
+                        ) : friendshipStatus === 'sent' ? (
+                            <button 
+                                disabled
+                                className="flex-1 py-3 bg-gray-700 rounded-xl text-gray-400 font-bold flex items-center justify-center gap-2 cursor-default border border-gray-600"
+                            >
+                                <Clock className="w-5 h-5" />
+                                {t('requestSent')}
+                            </button>
+                        ) : (
+                            <button 
+                                onClick={handleAddFriend}
+                                disabled={friendshipStatus === 'loading'}
+                                className="flex-1 py-3 bg-gradient-to-r from-emerald-500 to-teal-500 rounded-xl text-white font-bold flex items-center justify-center gap-2 hover:opacity-90 transition shadow-lg shadow-emerald-500/20"
+                            >
+                                {friendshipStatus === 'loading' ? <Loader2 className="w-5 h-5 animate-spin" /> : <UserPlus className="w-5 h-5" />}
+                                {t('addFriend')}
+                            </button>
+                        )}
+
                         <button 
                             onClick={onGift}
                             className="flex-1 py-3 bg-gradient-to-r from-yellow-500 to-orange-500 rounded-xl text-white font-bold flex items-center justify-center gap-2 hover:opacity-90 transition shadow-lg shadow-orange-500/20"

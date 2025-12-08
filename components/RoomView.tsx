@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, memo } from 'react';
-import { ArrowLeft, Send, Heart, Share2, Gift as GiftIcon, Users, Crown, Mic, MicOff, Lock, Unlock, Settings, Image as ImageIcon, X, Info, Minimize2, LogOut, BadgeCheck, Loader2, Upload, Shield, Trophy, Bot, Volume2, VolumeX, ArrowDownCircle, Ban, Trash2, UserCog, UserMinus, Zap, BarChart3, Gamepad2, Clock, LayoutGrid, ListMusic, Plus, Check, Search, Circle, CheckCircle2, KeyRound, MoreVertical, Grid, Sprout, Car, RotateCw, Coins, History, Hand, Hexagon, Play, Pause, SkipForward, SkipBack, Music, Flag } from 'lucide-react';
+import { ArrowLeft, Send, Heart, Share2, Gift as GiftIcon, Users, Crown, Mic, MicOff, Lock, Unlock, Settings, Image as ImageIcon, X, Info, Minimize2, LogOut, BadgeCheck, Loader2, Upload, Shield, Trophy, Bot, Volume2, VolumeX, ArrowDownCircle, Ban, Trash2, UserCog, UserMinus, Zap, BarChart3, Gamepad2, Clock, LayoutGrid, ListMusic, Plus, Check, Search, Circle, CheckCircle2, KeyRound, MoreVertical, Grid, Sprout, Car, RotateCw, Coins, History, Hand, Hexagon, Play, Pause, SkipForward, SkipBack, Music, Flag, HeartHandshake, Film } from 'lucide-react';
 import { Room, ChatMessage, Gift, Language, User, RoomSeat } from '../types';
 import { GIFTS, STORE_ITEMS, ROOM_BACKGROUNDS, VIP_TIERS, ADMIN_ROLES } from '../constants';
 import { listenToMessages, sendMessage, takeSeat, leaveSeat, updateRoomDetails, sendGiftTransaction, toggleSeatLock, toggleSeatMute, decrementViewerCount, listenToRoom, kickUserFromSeat, banUserFromRoom, unbanUserFromRoom, removeRoomAdmin, addRoomAdmin, searchUserByDisplayId, enterRoom, exitRoom, listenToRoomViewers, getUserProfile, changeRoomSeatCount, updateWalletForGame } from '../services/firebaseService';
@@ -123,6 +123,7 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
   
   const [showGiftPanel, setShowGiftPanel] = useState(false);
   const [giftTab, setGiftTab] = useState<'static' | 'animated'>('static');
+  const [giftCategory, setGiftCategory] = useState<'standard' | 'cp'>('standard');
   const [selectedGift, setSelectedGift] = useState<Gift | null>(null);
   const [giftTargets, setGiftTargets] = useState<string[]>(['all']); 
   const [giftMultiplier, setGiftMultiplier] = useState<number>(1);
@@ -297,7 +298,10 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
       lastRound: { ar: 'الجولات السابقة', en: 'Last Rounds' },
       roundStart: { ar: 'جولة جديدة', en: 'New Round' },
       bettingClosed: { ar: 'انتهى الرهان', en: 'Betting Closed' },
-      dailyProfit: { ar: 'الربح اليومي', en: 'Daily Profit' }
+      dailyProfit: { ar: 'الربح اليومي', en: 'Daily Profit' },
+      cp: { ar: 'CP', en: 'CP' },
+      standard: { ar: 'عادية', en: 'Standard' },
+      uploadVideo: { ar: 'رفع فيديو', en: 'Upload Video' }
     };
     return dict[key]?.[language] || key;
   };
@@ -580,7 +584,49 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
   const handleToggleMyMute = async () => { if (!mySeat) return; const nextMutedState = !mySeat.isMuted; setRoom(prev => { const newSeats = prev.seats.map(s => s.userId === currentUser.id ? { ...s, isMuted: nextMutedState } : s); return { ...prev, seats: newSeats }; }); toggleMicMute(nextMutedState); try { await toggleSeatMute(room.id, mySeat.index, nextMutedState); } catch (e) {} };
   const handleLeaveSeat = async () => { if (!mySeat) return; setRoom(prev => { const newSeats = prev.seats.map(s => s.index === mySeat.index ? { ...s, userId: null, userName: null, userAvatar: null, giftCount: 0, adminRole: null, isMuted: false, frameId: null, vipLevel: 0 } : s); return { ...prev, seats: newSeats }; }); unpublishMicrophone().catch(console.warn); try { await leaveSeat(room.id, currentUser); } catch (e) { console.error("Error leaving seat:", e); } };
   const handleToggleSpeaker = () => { const newState = !isSpeakerMuted; setIsSpeakerMuted(newState); toggleAllRemoteAudio(newState); };
-  const handleBgUpload = async (e: React.ChangeEvent<HTMLInputElement>, type: 'inner' | 'outer') => { const file = e.target.files?.[0]; if (file) { if (file.size > 5 * 1024 * 1024) { alert(language === 'ar' ? "الملف كبير جداً" : "File too large"); return; } try { const compressed = await compressImage(file, 1280, 0.7, file.type === 'image/gif'); if (compressed.length > 950000) { alert(language === 'ar' ? "الصورة كبيرة" : "Image too large"); return; } if (type === 'outer') await handleUpdateRoom({ thumbnail: compressed }); else await handleUpdateRoom({ backgroundImage: compressed }); alert(language === 'ar' ? "تم التحديث" : "Updated successfully"); } catch (error) { alert("Failed"); } } };
+  
+  const handleBgUpload = async (e: React.ChangeEvent<HTMLInputElement>, type: 'inner' | 'outer') => { 
+      const file = e.target.files?.[0]; 
+      if (file) { 
+          // Validate file size (e.g., 5MB limit for videos because of Firestore limits)
+          if (file.size > 5 * 1024 * 1024) { 
+              alert(language === 'ar' ? "الملف كبير جداً" : "File too large"); 
+              return; 
+          } 
+          
+          try {
+              let content = '';
+              const isVideo = file.type.startsWith('video/');
+              
+              if (isVideo) {
+                  // For video, read as Data URL directly (no compression logic for video here)
+                  const reader = new FileReader();
+                  reader.onloadend = async () => {
+                      if (typeof reader.result === 'string') {
+                          content = reader.result;
+                          if (type === 'outer') await handleUpdateRoom({ thumbnail: content }); 
+                          else await handleUpdateRoom({ backgroundImage: content, backgroundType: 'video' });
+                          alert(language === 'ar' ? "تم التحديث" : "Updated successfully");
+                      }
+                  };
+                  reader.readAsDataURL(file);
+              } else {
+                  // For images, use existing compression
+                  const compressed = await compressImage(file, 1280, 0.7, file.type === 'image/gif'); 
+                  if (compressed.length > 950000) { 
+                      alert(language === 'ar' ? "الصورة كبيرة" : "Image too large"); 
+                      return; 
+                  } 
+                  if (type === 'outer') await handleUpdateRoom({ thumbnail: compressed }); 
+                  else await handleUpdateRoom({ backgroundImage: compressed, backgroundType: 'image' }); 
+                  alert(language === 'ar' ? "تم التحديث" : "Updated successfully");
+              }
+          } catch (error) { 
+              alert("Failed"); 
+          } 
+      } 
+  };
+
   const handleKickSeat = (seatIndex: number) => { setRoom(prev => { const newSeats = [...prev.seats]; if (newSeats[seatIndex]) newSeats[seatIndex] = { ...newSeats[seatIndex], userId: null, userName: null, userAvatar: null, giftCount: 0, adminRole: null, isMuted: false, frameId: null, vipLevel: 0 }; return { ...prev, seats: newSeats }; }); kickUserFromSeat(room.id, seatIndex); setSelectedUser(null); };
   const handleBanRequest = (userId: string) => { if (userId === currentUser.id) return; setUserToBan(userId); setSelectedUser(null); setShowBanDurationModal(true); };
   const executeBan = async (durationInMinutes: number) => { if (!userToBan) return; const uid = userToBan; const targetSeat = seats.find(s => s.userId === uid || (s as any).uid === uid); if (targetSeat) handleKickSeat(targetSeat.index); const expiry = durationInMinutes === -1 ? -1 : Date.now() + (durationInMinutes * 60 * 1000); setRoom(prev => ({ ...prev, bannedUsers: { ...prev.bannedUsers, [uid]: expiry } })); await banUserFromRoom(room.id, uid, durationInMinutes); setShowBanDurationModal(false); setUserToBan(null); };
@@ -595,18 +641,36 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
   const selectedUserId = selectedUser?.userId;
   const filteredStagedFiles = stagedFiles.filter(f => f.name.toLowerCase().includes(importSearch.toLowerCase()));
 
-  const filteredGifts = GIFTS.filter(g => g.type === giftTab);
+  // Filter gifts based on new category logic
+  const filteredGifts = GIFTS.filter(g => {
+      if (giftCategory === 'cp') {
+          return g.category === 'cp';
+      }
+      // If standard category, filter by static/animated and exclude CP
+      return g.type === giftTab && g.category !== 'cp';
+  });
 
   return (
     <div className="relative h-[100dvh] w-full bg-black flex flex-col overflow-hidden">
       
       {/* FULL SCREEN BACKGROUND */}
       <div className="absolute inset-0 z-0 bg-gray-900 overflow-hidden">
-        <img 
-          src={room.backgroundImage || room.thumbnail} 
-          className="w-full h-full object-cover object-center transition-opacity duration-700" 
-          alt="Room Background"
-        />
+        {room.backgroundType === 'video' ? (
+            <video
+              src={room.backgroundImage}
+              autoPlay
+              loop
+              muted
+              playsInline
+              className="w-full h-full object-cover object-center transition-opacity duration-700"
+            />
+        ) : (
+            <img 
+              src={room.backgroundImage || room.thumbnail} 
+              className="w-full h-full object-cover object-center transition-opacity duration-700" 
+              alt="Room Background"
+            />
+        )}
         <div className="absolute inset-0 bg-gradient-to-b from-black/60 via-transparent to-black/80 z-0 pointer-events-none"></div>
       </div>
 
@@ -1064,58 +1128,25 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
           </div>
       )}
 
-      {showMusicPlaylist && (
-          <div className="absolute inset-0 z-[90] bg-gray-900 flex flex-col animate-in slide-in-from-right font-sans">
-              <div className="p-4 bg-gray-800/80 backdrop-blur shadow-md flex items-center gap-3 border-b border-white/5">
-                  <button onClick={() => setShowMusicPlaylist(false)} className="p-2 rounded-full hover:bg-white/10 text-white">
-                      <ArrowLeft className="w-6 h-6 rtl:rotate-180" />
-                  </button>
-                  <h1 className="text-lg font-bold text-white flex items-center gap-2">
-                      <ListMusic className="w-5 h-5 text-brand-400"/> {t('playlist')}
-                  </h1>
-              </div>
-              <div className="flex-1 overflow-y-auto p-4 space-y-2">
-                  {playlist.length === 0 ? (
-                      <div className="flex flex-col items-center justify-center mt-20 opacity-50">
-                          <Music className="w-16 h-16 text-gray-600 mb-4"/>
-                          <p className="text-gray-400 text-sm">{t('noMusic') || "No music added yet"}</p>
-                      </div>
-                  ) : (
-                      playlist.map((song) => (
-                          <div key={song.id} className={`flex items-center justify-between p-3 rounded-xl border transition ${currentSong?.id === song.id ? 'bg-brand-900/30 border-brand-500/50' : 'bg-gray-800/50 border-gray-700 hover:border-gray-500'}`}>
-                              <div className="flex items-center gap-3 overflow-hidden cursor-pointer flex-1" onClick={() => { playSong(song); setShowMusicPlaylist(false); }}>
-                                  <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${currentSong?.id === song.id ? 'bg-brand-500 text-white' : 'bg-gray-700 text-gray-400'}`}><Music className="w-5 h-5" /></div>
-                                  <div className="flex flex-col min-w-0">
-                                      <span className={`text-sm font-bold truncate ${currentSong?.id === song.id ? 'text-brand-300' : 'text-white'}`}>{song.name}</span>
-                                      <span className="text-[10px] text-gray-500">{t('localMusic')}</span>
-                                  </div>
-                              </div>
-                              <div className="flex items-center gap-2">
-                                {currentSong?.id === song.id && isMusicPlaying && (
-                                    <div className="flex gap-0.5 items-end h-4 mr-2">
-                                        <div className="w-1 bg-brand-400 animate-[music-wave_0.6s_ease-in-out_infinite] h-2"></div>
-                                        <div className="w-1 bg-brand-400 animate-[music-wave_0.8s_ease-in-out_infinite] h-4"></div>
-                                        <div className="w-1 bg-brand-400 animate-[music-wave_1.0s_ease-in-out_infinite] h-3"></div>
-                                    </div>
-                                )}
-                                <button onClick={(e) => handleDeleteSong(song.id, e)} className="p-2 text-red-400 hover:text-red-300 rounded-full hover:bg-red-900/20"><Trash2 className="w-4 h-4" /></button>
-                              </div>
-                          </div>
-                      ))
-                  )}
-              </div>
-              <div className="p-4 bg-gray-900 border-t border-white/5 pb-8">
-                  <button onClick={() => { setShowMusicPlaylist(false); setShowImportView(true); }} className="w-full py-4 rounded-2xl bg-white/5 hover:bg-white/10 border border-white/10 backdrop-blur-md flex items-center justify-center gap-2 cursor-pointer transition active:scale-95 group">
-                      <div className="p-2 bg-brand-600 rounded-full group-hover:bg-brand-500 transition shadow-lg shadow-brand-500/20"><Plus className="w-6 h-6 text-white"/></div>
-                      <span className="text-white font-bold text-sm tracking-wide">{t('addMusic')}</span>
-                  </button>
-              </div>
-          </div>
-      )}
-
       {showGiftPanel && (
           <div className="absolute inset-0 z-50 flex flex-col justify-end bg-black/50 backdrop-blur-sm animate-in slide-in-from-bottom-10">
               <div className="bg-gray-900/30 backdrop-blur-3xl border-t border-white/20 rounded-t-3xl p-4 shadow-2xl h-[60vh] flex flex-col">
+                  {/* Category Tabs */}
+                  <div className="flex gap-2 mb-3 bg-black/20 p-1 rounded-xl">
+                      <button 
+                          onClick={() => setGiftCategory('standard')}
+                          className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition ${giftCategory === 'standard' ? 'bg-white text-black' : 'text-gray-400 hover:text-white'}`}
+                      >
+                          {t('standard')}
+                      </button>
+                      <button 
+                          onClick={() => setGiftCategory('cp')}
+                          className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1 ${giftCategory === 'cp' ? 'bg-gradient-to-r from-pink-500 to-rose-500 text-white shadow-lg' : 'text-gray-400 hover:text-white'}`}
+                      >
+                          <HeartHandshake className="w-3 h-3" /> {t('cp')}
+                      </button>
+                  </div>
+
                   <div className="flex gap-4 overflow-x-auto p-2 mb-2 border-b border-white/5 no-scrollbar min-h-[60px] items-center flex-row">
                         <div onClick={() => toggleGiftTarget('all')} className={`flex flex-col items-center gap-1 cursor-pointer shrink-0 transition-transform active:scale-95 ${giftTargets.includes('all') ? 'opacity-100 scale-105' : 'opacity-60'}`}>
                             <div className={`w-10 h-10 rounded-full flex items-center justify-center border-2 ${giftTargets.includes('all') ? 'border-brand-500 bg-brand-500/20 text-white' : 'border-gray-600 bg-gray-800 text-gray-400'}`}><Users className="w-5 h-5" /></div>
@@ -1132,13 +1163,24 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
                             </div>
                         ))}
                   </div>
-                  <div className="flex justify-between items-center mb-2">
-                      <div className="flex gap-2">
-                          <button onClick={() => setGiftTab('static')} className={`px-4 py-1.5 rounded-full text-xs font-bold transition ${giftTab === 'static' ? 'bg-white text-black' : 'bg-gray-800/50 text-gray-400'}`}>{t('static')}</button>
-                          <button onClick={() => setGiftTab('animated')} className={`px-4 py-1.5 rounded-full text-xs font-bold transition ${giftTab === 'animated' ? 'bg-gradient-to-r from-purple-500 to-pink-500 text-white shadow-lg' : 'bg-gray-800/50 text-gray-400'}`}>{t('animated')}</button>
+                  
+                  {/* Type Toggles (Only show if Standard category) */}
+                  {giftCategory === 'standard' && (
+                      <div className="flex justify-between items-center mb-2">
+                          <div className="flex gap-2">
+                              <button onClick={() => setGiftTab('static')} className={`px-4 py-1.5 rounded-full text-xs font-bold transition ${giftTab === 'static' ? 'bg-white text-black' : 'bg-gray-800/50 text-gray-400'}`}>{t('static')}</button>
+                              <button onClick={() => setGiftTab('animated')} className={`px-4 py-1.5 rounded-full text-xs font-bold transition ${giftTab === 'animated' ? 'bg-gradient-to-r from-purple-500 to-pink-500 text-white shadow-lg' : 'bg-gray-800/50 text-gray-400'}`}>{t('animated')}</button>
+                          </div>
+                          <button onClick={() => setShowGiftPanel(false)}><X className="w-5 h-5 text-gray-500" /></button>
                       </div>
-                      <button onClick={() => setShowGiftPanel(false)}><X className="w-5 h-5 text-gray-500" /></button>
-                  </div>
+                  )}
+                  {giftCategory === 'cp' && (
+                      <div className="flex justify-between items-center mb-2">
+                          <span className="text-xs text-pink-300 font-bold flex items-center gap-1"><Heart className="w-3 h-3 fill-pink-300"/> Special Love Collection</span>
+                          <button onClick={() => setShowGiftPanel(false)}><X className="w-5 h-5 text-gray-500" /></button>
+                      </div>
+                  )}
+
                   <div className="flex-1 overflow-y-auto grid grid-cols-4 gap-3 pb-2 content-start custom-scrollbar">
                       {filteredGifts.map(gift => (
                           <button key={gift.id} onClick={() => setSelectedGift(gift)} disabled={isSendingGift} className={`flex flex-col items-center p-2 rounded-xl border transition relative group ${selectedGift?.id === gift.id ? 'border-brand-500 bg-brand-500/10' : 'border-transparent hover:bg-white/5'} ${isSendingGift ? 'opacity-50 cursor-not-allowed' : ''}`}>
@@ -1335,10 +1377,10 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
                               <div className="flex bg-black/40 rounded-lg p-1 border border-white/10"><button onClick={() => setBgType('inner')} className={`flex-1 py-1.5 rounded text-[10px] font-bold transition ${bgType === 'inner' ? 'bg-gray-700 text-white' : 'text-gray-400'}`}>{t('innerBg')}</button><button onClick={() => setBgType('outer')} className={`flex-1 py-1.5 rounded text-[10px] font-bold transition ${bgType === 'outer' ? 'bg-gray-700 text-white' : 'text-gray-400'}`}>{t('outerBg')}</button></div>
                               <div className="flex gap-3 overflow-x-auto pb-4 pt-2 px-1 scrollbar-hide">
                                   <label className="shrink-0 w-24 h-24 rounded-xl border-2 border-dashed border-gray-600 flex flex-col items-center justify-center cursor-pointer hover:border-brand-500 bg-white/5 transition group">
-                                      <input type="file" className="hidden" accept="image/*" onChange={(e) => handleBgUpload(e, bgType)} />
+                                      <input type="file" className="hidden" accept="image/*,video/*" onChange={(e) => handleBgUpload(e, bgType)} />
                                       <div className="w-8 h-8 rounded-full bg-gray-700 flex items-center justify-center group-hover:bg-brand-500 transition mb-1"><Upload className="w-4 h-4 text-white" /></div><span className="text-[9px] text-gray-400 font-bold">{t('uploadBg')}</span>
                                   </label>
-                                  {ROOM_BACKGROUNDS.map((bg, i) => (<button key={i} onClick={() => { bgType === 'inner' ? handleUpdateRoom({ backgroundImage: bg }) : handleUpdateRoom({ thumbnail: bg }); }} className={`shrink-0 w-24 h-24 rounded-xl border-2 overflow-hidden relative group transition-all hover:scale-105 ${(bgType === 'inner' && room.backgroundImage === bg) || (bgType === 'outer' && room.thumbnail === bg) ? 'border-brand-500 ring-2 ring-brand-500/30' : 'border-transparent border-white/10'}`}><img src={bg} className="w-full h-full object-cover" />{((bgType === 'inner' && room.backgroundImage === bg) || (bgType === 'outer' && room.thumbnail === bg)) && (<div className="absolute inset-0 bg-brand-500/40 flex items-center justify-center backdrop-blur-[1px]"><div className="bg-white rounded-full p-1 shadow-lg"><BadgeCheck className="w-5 h-5 text-brand-600 fill-white" /></div></div>)}</button>))}
+                                  {ROOM_BACKGROUNDS.map((bg, i) => (<button key={i} onClick={() => { bgType === 'inner' ? handleUpdateRoom({ backgroundImage: bg, backgroundType: 'image' }) : handleUpdateRoom({ thumbnail: bg }); }} className={`shrink-0 w-24 h-24 rounded-xl border-2 overflow-hidden relative group transition-all hover:scale-105 ${(bgType === 'inner' && room.backgroundImage === bg) || (bgType === 'outer' && room.thumbnail === bg) ? 'border-brand-500 ring-2 ring-brand-500/30' : 'border-transparent border-white/10'}`}><img src={bg} className="w-full h-full object-cover" />{((bgType === 'inner' && room.backgroundImage === bg) || (bgType === 'outer' && room.thumbnail === bg)) && (<div className="absolute inset-0 bg-brand-500/40 flex items-center justify-center backdrop-blur-[1px]"><div className="bg-white rounded-full p-1 shadow-lg"><BadgeCheck className="w-5 h-5 text-brand-600 fill-white" /></div></div>)}</button>))}
                               </div>
                           </div>
                       )}

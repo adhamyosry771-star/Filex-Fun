@@ -367,7 +367,7 @@ export const resetAllRoomCups = async () => {
 };
 
 // --- Rooms ---
-export const createRoom = async (title: string, thumbnail: string, host: User, hostUid: string) => {
+export const createRoom = async (title: string, thumbnail: string, host: User, hostUid: string, backgroundType: 'image' | 'video' = 'image') => {
     const roomRef = doc(collection(db, 'rooms'));
     const initialSeatCount = 10;
     // Total seats = 1 (host) + seatCount
@@ -379,8 +379,9 @@ export const createRoom = async (title: string, thumbnail: string, host: User, h
         hostAvatar: host.avatar,
         hostId: host.id, 
         viewerCount: 0,
-        thumbnail,
-        backgroundImage: '', // Ensure field exists
+        thumbnail, // Used as cover for list
+        backgroundImage: thumbnail, // Used for inside (can be video if type is video)
+        backgroundType: backgroundType, // Default image
         tags: [],
         isAiHost: false,
         seatCount: initialSeatCount,
@@ -767,6 +768,21 @@ export const purchaseStoreItem = async (uid: string, item: StoreItem, currentUse
     }
 
     await batch.commit();
+};
+
+// --- Store Management ---
+export const addStoreItem = async (item: StoreItem) => {
+  await setDoc(doc(db, 'store', item.id), item);
+};
+
+export const getStoreItems = async (): Promise<StoreItem[]> => {
+  const colRef = collection(db, 'store');
+  const snap = await getDocs(colRef);
+  return snap.docs.map(d => d.data() as StoreItem);
+};
+
+export const deleteStoreItem = async (itemId: string) => {
+  await deleteDoc(doc(db, 'store', itemId));
 };
 
 // --- Wallet & Exchange & Games ---

@@ -158,6 +158,7 @@ export interface Room {
   viewerCount: number;
   thumbnail: string; // Outer Cover
   backgroundImage?: string; // Inner Background
+  backgroundType?: 'image' | 'video'; // New field to support video backgrounds
   tags: string[];
   isAiHost: boolean;
   seats: RoomSeat[];
@@ -191,16 +192,18 @@ export interface Gift {
   icon: string;
   cost: number;
   type: 'static' | 'animated';
+  category?: 'standard' | 'cp'; // New field for CP gifts
   animationClass?: string; // CSS class for animation
 }
 
 export interface StoreItem {
   id: string;
-  type: 'frame' | 'bubble';
+  type: 'frame' | 'bubble' | 'entrance';
   name: { ar: string, en: string };
   price: number;
   currency: 'diamonds' | 'coins';
   previewClass: string;
+  videoUrl?: string;
 }
 
 export interface VipTier {

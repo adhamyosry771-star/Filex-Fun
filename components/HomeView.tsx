@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { Users, Search, Bell, Plus, X, Image as ImageIcon, Upload, Flame, Tag, UserPlus, BadgeCheck, ChevronRight, ChevronLeft, Gamepad2, Lock, LayoutGrid, List, Info, Home as HomeIcon, Clock, History, Quote } from 'lucide-react';
+import { Users, Search, Bell, Plus, X, Image as ImageIcon, Upload, Flame, Tag, UserPlus, BadgeCheck, ChevronRight, ChevronLeft, Gamepad2, Lock, LayoutGrid, List, Info, Home as HomeIcon, Clock, History, Quote, Video } from 'lucide-react';
 import { Room, Language, User, Banner } from '../types';
 import { createRoom, listenToBanners } from '../services/firebaseService';
 import { auth } from '../firebaseConfig';
@@ -18,6 +18,7 @@ const HomeView: React.FC<HomeViewProps> = ({ rooms, onJoinRoom, language, userPr
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [newRoomTitle, setNewRoomTitle] = useState('');
   const [selectedBg, setSelectedBg] = useState(ROOM_BACKGROUNDS[0]);
+  const [backgroundType, setBackgroundType] = useState<'image' | 'video'>('image');
   const [creating, setCreating] = useState(false);
   
   // Search State
@@ -87,7 +88,7 @@ const HomeView: React.FC<HomeViewProps> = ({ rooms, onJoinRoom, language, userPr
         noRooms: { ar: 'لا توجد غرف مطابقة. كن أول من ينشئ غرفة!', en: 'No matching rooms. Be the first to create one!' },
         noMyRooms: { ar: 'لا تملك أي غرف بعد', en: 'You have no rooms yet' },
         noRecent: { ar: 'لم تقم بزيارة أي غرفة مؤخراً', en: 'No recent rooms visited' },
-        uploadBg: { ar: 'رفع صورة', en: 'Upload Image' },
+        uploadBg: { ar: 'رفع صورة/فيديو', en: 'Upload Media' },
         searchPlaceholder: { ar: 'بحث عن غرفة، مضيف، أو تاج...', en: 'Search rooms, hosts, or tags...' },
         findUsers: { ar: 'هل تبحث عن مستخدم؟', en: 'Looking for a user?' },
         clear: { ar: 'مسح', en: 'Clear' },
@@ -150,7 +151,8 @@ const HomeView: React.FC<HomeViewProps> = ({ rooms, onJoinRoom, language, userPr
 
       setCreating(true);
       try {
-          await createRoom(newRoomTitle, selectedBg, userProfile, auth.currentUser.uid);
+          // Pass the background type. The selectedBg is already the data URL.
+          await createRoom(newRoomTitle, selectedBg, userProfile, auth.currentUser.uid, backgroundType);
           setShowCreateModal(false);
           setNewRoomTitle('');
           setSelectedCategory('myRoom'); // Switch to My Room to see it
@@ -164,10 +166,20 @@ const HomeView: React.FC<HomeViewProps> = ({ rooms, onJoinRoom, language, userPr
   const handleBgUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
       if (file) {
+          if (file.size > 5 * 1024 * 1024) {
+              alert(language === 'ar' ? 'حجم الملف كبير جداً (أقصى 5 ميجا)' : 'File too large (Max 5MB)');
+              return;
+          }
+
           const reader = new FileReader();
           reader.onloadend = () => {
               if (typeof reader.result === 'string') {
                   setSelectedBg(reader.result);
+                  if (file.type.startsWith('video/')) {
+                      setBackgroundType('video');
+                  } else {
+                      setBackgroundType('image');
+                  }
               }
           };
           reader.readAsDataURL(file);
@@ -574,7 +586,7 @@ const HomeView: React.FC<HomeViewProps> = ({ rooms, onJoinRoom, language, userPr
                           <label className="text-xs text-gray-400 mb-2 block">{t('bg')}</label>
                           <div className="flex gap-3 overflow-x-auto pb-4 pt-1 px-1 scrollbar-hide">
                                 <label className="shrink-0 w-24 h-24 rounded-lg border-2 border-dashed border-gray-600 flex flex-col items-center justify-center cursor-pointer hover:border-brand-500 hover:bg-white/5 transition bg-white/5 group">
-                                    <input type="file" accept="image/*" className="hidden" onChange={handleBgUpload} />
+                                    <input type="file" accept="image/*,video/*" className="hidden" onChange={handleBgUpload} />
                                     <div className="w-8 h-8 rounded-full bg-gray-700 flex items-center justify-center group-hover:bg-brand-500 transition mb-1">
                                         <Upload className="w-4 h-4 text-white" />
                                     </div>
@@ -583,11 +595,14 @@ const HomeView: React.FC<HomeViewProps> = ({ rooms, onJoinRoom, language, userPr
                                 {ROOM_BACKGROUNDS.map((bg, i) => (
                                     <button 
                                         key={i} 
-                                        onClick={() => setSelectedBg(bg)}
-                                        className={`shrink-0 w-24 h-24 rounded-lg overflow-hidden border-2 relative transition hover:scale-105 ${selectedBg === bg ? 'border-brand-500 ring-2 ring-brand-500/30' : 'border-transparent border-white/10'}`}
+                                        onClick={() => {
+                                            setSelectedBg(bg);
+                                            setBackgroundType('image');
+                                        }}
+                                        className={`shrink-0 w-24 h-24 rounded-lg overflow-hidden border-2 relative transition hover:scale-105 ${selectedBg === bg && backgroundType === 'image' ? 'border-brand-500 ring-2 ring-brand-500/30' : 'border-transparent border-white/10'}`}
                                     >
                                         <img src={bg} className="w-full h-full object-cover" />
-                                        {selectedBg === bg && (
+                                        {selectedBg === bg && backgroundType === 'image' && (
                                             <div className="absolute inset-0 bg-brand-500/40 flex items-center justify-center backdrop-blur-[1px]">
                                                 <div className="bg-white rounded-full p-1 shadow-lg"><BadgeCheck className="w-5 h-5 text-brand-600 fill-white" /></div>
                                             </div>

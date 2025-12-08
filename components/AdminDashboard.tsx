@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
-import { Shield, Trash2, Ban, Search, Gift, Crown, ArrowLeft, RefreshCw, CheckCircle, Megaphone, Edit3, Send, Home, XCircle, Flame, Image as ImageIcon, Plus, X, Database, Clock, Gamepad2, BadgeCheck, Coins, Trophy, Ghost, Lock, Unlock, Percent, AlertTriangle, MessageCircleOff } from 'lucide-react';
-import { getAllUsers, adminUpdateUser, deleteAllRooms, sendSystemNotification, broadcastOfficialMessage, searchUserByDisplayId, getRoomsByHostId, adminBanRoom, deleteRoom, toggleRoomHotStatus, toggleRoomActivitiesStatus, addBanner, deleteBanner, listenToBanners, syncRoomIdsWithUserIds, toggleRoomOfficialStatus, resetAllUsersCoins, resetAllRoomCups, resetAllGhostUsers, updateRoomGameConfig, resetAllAppCommunications } from '../services/firebaseService';
+import { Shield, Trash2, Ban, Search, Gift, Crown, ArrowLeft, RefreshCw, CheckCircle, Megaphone, Edit3, Send, Home, XCircle, Flame, Image as ImageIcon, Plus, X, Database, Clock, Gamepad2, BadgeCheck, Coins, Trophy, Ghost, Lock, Unlock, Percent, AlertTriangle } from 'lucide-react';
+import { getAllUsers, adminUpdateUser, deleteAllRooms, sendSystemNotification, broadcastOfficialMessage, searchUserByDisplayId, getRoomsByHostId, adminBanRoom, deleteRoom, toggleRoomHotStatus, toggleRoomActivitiesStatus, addBanner, deleteBanner, listenToBanners, syncRoomIdsWithUserIds, toggleRoomOfficialStatus, resetAllUsersCoins, resetAllRoomCups, resetAllGhostUsers, updateRoomGameConfig } from '../services/firebaseService';
 import { Language, User, Room, Banner } from '../types';
 import { VIP_TIERS, ADMIN_ROLES } from '../constants';
 
@@ -19,7 +19,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, language }) => 
   
   // Search Results
   const [searchedUser, setSearchedUser] = useState<User | null>(null);
-  const [searchedRooms, setSearchedRooms] = useState<Room[]>([]); 
+  const [searchedRooms, setSearchedRooms] = useState<Room[]>([]); // Changed to Array
 
   // Banners
   const [banners, setBanners] = useState<Banner[]>([]);
@@ -36,31 +36,21 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, language }) => 
 
   // Ban Modal
   const [showBanModal, setShowBanModal] = useState<string | null>(null);
-  const [banDuration, setBanDuration] = useState<number>(-1); 
-
-  // Game Config Modal
-  const [showGameConfigModal, setShowGameConfigModal] = useState<Room | null>(null);
-  const [roomLuck, setRoomLuckState] = useState<number>(50);
-  const [gameMode, setGameModeState] = useState<'FAIR' | 'DRAIN' | 'HOOK'>('FAIR');
-  const [hookThreshold, setHookThresholdState] = useState<string>('50000');
+  const [banDuration, setBanDuration] = useState<number>(-1); // -1 Permanent, 1, 3, 7, 30 days
 
   const [officialTitle, setOfficialTitle] = useState('');
   const [officialBody, setOfficialBody] = useState('');
+
+  // Luck State
+  const [roomLuck, setRoomLuckState] = useState<number>(50);
+  const [gameMode, setGameModeState] = useState<'FAIR' | 'DRAIN' | 'HOOK'>('FAIR');
+  const [hookThreshold, setHookThresholdState] = useState<string>('50000');
 
   useEffect(() => {
     fetchUsers();
     const unsubBanners = listenToBanners((data) => setBanners(data));
     return () => unsubBanners();
   }, []);
-
-  // When opening game config modal, sync state with room data
-  useEffect(() => {
-      if (showGameConfigModal) {
-          setRoomLuckState(showGameConfigModal.gameLuck || 50);
-          setGameModeState(showGameConfigModal.gameMode || 'FAIR');
-          setHookThresholdState(showGameConfigModal.hookThreshold?.toString() || '50000');
-      }
-  }, [showGameConfigModal]);
 
   const fetchUsers = async () => {
     setLoading(true);
@@ -231,24 +221,18 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, language }) => 
       setActionLoading(null);
   };
 
-  const handleSaveGameConfig = async () => {
-      if (!showGameConfigModal) return;
-      const roomId = showGameConfigModal.id;
-      
-      setActionLoading('config_save');
+  const handleUpdateRoomGameConfig = async (roomId: string) => {
+      if (!roomId) return;
+      setActionLoading('room_luck_' + roomId);
       try {
-          const threshold = parseInt(hookThreshold) || 50000;
-          await updateRoomGameConfig(roomId, roomLuck, gameMode, threshold);
-          
+          await updateRoomGameConfig(roomId, roomLuck, gameMode, parseInt(hookThreshold) || 50000);
           setSearchedRooms(prev => prev.map(r => r.id === roomId ? { 
               ...r, 
               gameLuck: roomLuck,
               gameMode: gameMode,
-              hookThreshold: threshold
+              hookThreshold: parseInt(hookThreshold) || 50000
           } : r));
-          
-          alert(`تم تحديث استراتيجية اللعب بنجاح!`);
-          setShowGameConfigModal(null);
+          alert(`تم تحديث إعدادات اللعبة بنجاح!`);
       } catch (e) {
           alert("فشل التحديث");
       }
@@ -443,18 +427,6 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, language }) => 
       setActionLoading(null);
   };
 
-  const handleResetAllCommunications = async () => {
-      if (!confirm("⚠️ تحذير: هل أنت متأكد من مسح جميع المحادثات والرسائل الخاصة ورسائل الرومات؟ هذا الإجراء لا يمكن التراجع عنه.")) return;
-      setActionLoading('reset_comms');
-      try {
-          await resetAllAppCommunications();
-          alert("تم تصفير جميع الرسائل والمحادثات بنجاح!");
-      } catch (e) {
-          alert("حدث خطأ أثناء المسح");
-      }
-      setActionLoading(null);
-  };
-
   const handleSyncRoomIds = async () => {
       if (!confirm("⚠️ هذا الإجراء سيقوم بتغيير ID جميع الرومات الموجودة لتطابق ID أصحابها. هل أنت متأكد؟")) return;
       setActionLoading('sync_ids');
@@ -524,11 +496,13 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, language }) => 
           const img = new Image();
           img.onload = () => {
               const canvas = document.createElement('canvas');
+              // Aggressive resizing to fit within Firestore 1MB limit
               const MAX_WIDTH = 700;
               const MAX_HEIGHT = 400; 
               let width = img.width;
               let height = img.height;
 
+              // Calculate aspect ratio to keep image not distorted
               if (width > height) {
                   if (width > MAX_WIDTH) {
                       height *= MAX_WIDTH / width;
@@ -547,7 +521,11 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, language }) => 
               
               if (ctx) {
                   ctx.drawImage(img, 0, 0, width, height);
+                  // Compress to JPEG with 0.5 quality (Aggressive compression)
+                  // This typically results in files < 100KB, well within Firestore limits
                   const dataUrl = canvas.toDataURL('image/jpeg', 0.5);
+                  
+                  // Set image directly without error alerts
                   setNewBannerImage(dataUrl);
               }
           };
@@ -558,6 +536,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, language }) => 
       reader.readAsDataURL(file);
   };
 
+  // Filter Agents
   const agents = users.filter(u => u.isAgent);
 
   return (
@@ -566,7 +545,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, language }) => 
       <div className="p-4 bg-gray-900 border-b border-gold-500/30 flex flex-col gap-4 shadow-lg relative overflow-hidden shrink-0">
         <div className="absolute inset-0 bg-gradient-to-l from-gold-500/10 to-transparent pointer-events-none"></div>
         
-        {/* Top Row */}
+        {/* Top Row: Back Button & Centered Title */}
         <div className="flex items-center justify-between relative z-10 w-full">
             <button onClick={onBack} className="p-2 rounded-full hover:bg-white/10 text-gold-400">
                 <ArrowLeft className="w-5 h-5" />
@@ -575,10 +554,10 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, language }) => 
                 <Shield className="w-6 h-6 text-gold-500" />
                 لوحة التحكم
             </h1>
-            <div className="w-9"></div> 
+            <div className="w-9"></div> {/* Spacer to keep title centered */}
         </div>
 
-        {/* Navigation Tabs */}
+        {/* Bottom Row: Navigation Tabs */}
         <div className="flex gap-2 relative z-10 overflow-x-auto w-full scrollbar-hide justify-center">
             <button 
                 onClick={() => setActiveTab('users')}
@@ -726,13 +705,54 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, language }) => 
                                               {room.isOfficial && <span className="bg-blue-600/20 text-blue-500 text-[10px] px-2 py-1 rounded font-bold border border-blue-500/50 flex items-center gap-1"><BadgeCheck className="w-3 h-3"/> OFF</span>}
                                           </div>
                                           
-                                          {/* Room Controls */}
-                                          <button 
-                                              onClick={() => setShowGameConfigModal(room)} 
-                                              className="w-full bg-purple-600/30 text-purple-400 text-[10px] py-2 rounded border border-purple-600/50 flex items-center justify-center gap-1 hover:bg-purple-600/50 font-bold mb-2"
-                                          >
-                                              <AlertTriangle className="w-3 h-3"/> إعدادات الألعاب والاستراتيجية
-                                          </button>
+                                          {/* Room Game RIGGING Controls */}
+                                          <div className="mb-2 p-2 bg-gray-900 rounded border border-gray-800 space-y-2">
+                                              
+                                              {/* Game Mode Selector */}
+                                              <div className="flex justify-between items-center text-[10px] text-gray-400">
+                                                  <span>نظام اللعب:</span>
+                                                  <select 
+                                                      value={gameMode} 
+                                                      onChange={(e) => setGameModeState(e.target.value as any)}
+                                                      className="bg-gray-800 text-white border border-gray-600 rounded px-1 outline-none"
+                                                  >
+                                                      <option value="FAIR">عشوائي (Fair)</option>
+                                                      <option value="DRAIN">استنزاف (Loss)</option>
+                                                      <option value="HOOK">طُعم (Smart)</option>
+                                                  </select>
+                                              </div>
+
+                                              {/* Hook Threshold Input */}
+                                              {gameMode === 'HOOK' && (
+                                                  <div className="flex justify-between items-center text-[10px] text-gray-400">
+                                                      <span>سقف الطُعم (Diamonds):</span>
+                                                      <input 
+                                                          type="number" 
+                                                          value={hookThreshold}
+                                                          onChange={(e) => setHookThresholdState(e.target.value)}
+                                                          className="w-20 bg-gray-800 text-white border border-gray-600 rounded px-1 outline-none text-center"
+                                                      />
+                                                  </div>
+                                              )}
+
+                                              {/* Legacy Luck Slider (Still useful for fine tuning DRAIN/FAIR bias if needed) */}
+                                              <div className="flex justify-between text-[10px] text-gray-400">
+                                                  <span>نسبة الحظ العشوائي</span>
+                                                  <span>{roomLuck}%</span>
+                                              </div>
+                                              <input 
+                                                  type="range" 
+                                                  min="0" 
+                                                  max="100" 
+                                                  value={roomLuck} 
+                                                  onChange={(e) => setRoomLuckState(parseInt(e.target.value))}
+                                                  className="w-full h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer"
+                                              />
+                                              
+                                              <button onClick={() => handleUpdateRoomGameConfig(room.id)} className="w-full bg-purple-600/30 text-purple-400 text-[10px] py-1.5 rounded border border-purple-600/50 flex items-center justify-center gap-1 hover:bg-purple-600/50 font-bold">
+                                                  <AlertTriangle className="w-3 h-3"/> تحديث خوارزميات اللعب
+                                              </button>
+                                          </div>
 
                                           <div className="grid grid-cols-2 gap-2">
                                                <button onClick={() => handleBanRoom(room.id, room.isBanned || false)} className={`py-1.5 rounded text-xs flex items-center justify-center gap-1 ${room.isBanned ? 'bg-green-600 text-white' : 'bg-red-600 text-white'}`}>
@@ -804,7 +824,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, language }) => 
           </div>
       )}
 
-      {/* ... Agencies / Banners / Official tabs ... */}
+      {/* ... (Agencies, Banners, System tabs remain the same as previous) ... */}
       {activeTab === 'agencies' && (
           <div className="flex-1 p-6 flex flex-col overflow-y-auto">
               <h3 className="font-bold text-blue-400 mb-4 flex items-center gap-2">
@@ -947,11 +967,6 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, language }) => 
                           <Trophy className="w-5 h-5"/>
                           {actionLoading === 'reset_cups' ? 'جاري التصفير...' : 'تصفير الكأس للجميع'}
                       </button>
-
-                      <button onClick={() => { if(confirm('مسح جميع الرسائل؟')) resetAllAppCommunications(); }} className="w-full bg-slate-600 hover:bg-slate-700 text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2 border border-slate-500">
-                          <MessageCircleOff className="w-5 h-5"/>
-                          تصفير جميع المحادثات
-                      </button>
                   </div>
               </div>
 
@@ -994,84 +1009,6 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, language }) => 
                   <div className="flex gap-2">
                       <button onClick={() => confirmBanUser(showBanModal, true)} className="flex-1 bg-red-600 text-white py-2 rounded font-bold">تأكيد الحظر</button>
                       <button onClick={() => setShowBanModal(null)} className="flex-1 bg-gray-700 text-white py-2 rounded">إلغاء</button>
-                  </div>
-              </div>
-          </div>
-      )}
-
-      {/* Game Config Modal */}
-      {showGameConfigModal && (
-          <div className="absolute inset-0 z-50 bg-black/80 backdrop-blur flex items-center justify-center p-4">
-              <div className="bg-gray-900 border border-purple-500 rounded-xl p-5 w-full max-w-sm shadow-2xl text-right animate-in zoom-in-95">
-                  <h3 className="text-purple-400 font-bold mb-4 flex items-center gap-2 border-b border-purple-500/30 pb-2">
-                      <Gamepad2 className="w-5 h-5"/> إعدادات اللعب والاستراتيجية
-                  </h3>
-                  
-                  <div className="space-y-4 mb-6">
-                      
-                      {/* Game Mode */}
-                      <div>
-                          <label className="text-gray-400 text-xs mb-1 block">نظام اللعب (Algorithm)</label>
-                          <div className="grid grid-cols-3 gap-2">
-                              <button 
-                                onClick={() => setGameModeState('FAIR')}
-                                className={`py-2 rounded text-xs font-bold border ${gameMode === 'FAIR' ? 'bg-green-600 border-green-500 text-white' : 'bg-black border-gray-700 text-gray-400'}`}
-                              >
-                                  عشوائي
-                              </button>
-                              <button 
-                                onClick={() => setGameModeState('DRAIN')}
-                                className={`py-2 rounded text-xs font-bold border ${gameMode === 'DRAIN' ? 'bg-red-600 border-red-500 text-white' : 'bg-black border-gray-700 text-gray-400'}`}
-                              >
-                                  استنزاف
-                              </button>
-                              <button 
-                                onClick={() => setGameModeState('HOOK')}
-                                className={`py-2 rounded text-xs font-bold border ${gameMode === 'HOOK' ? 'bg-blue-600 border-blue-500 text-white' : 'bg-black border-gray-700 text-gray-400'}`}
-                              >
-                                  طُعم (Smart)
-                              </button>
-                          </div>
-                      </div>
-
-                      {/* Hook Threshold */}
-                      {gameMode === 'HOOK' && (
-                          <div className="bg-blue-900/20 p-3 rounded-lg border border-blue-500/30">
-                              <label className="text-blue-300 text-xs mb-1 block">سقف الطُعم (Profit Threshold)</label>
-                              <input 
-                                  type="number" 
-                                  value={hookThreshold}
-                                  onChange={(e) => setHookThresholdState(e.target.value)}
-                                  className="w-full bg-black border border-blue-500/50 rounded p-2 text-white text-center font-mono"
-                                  placeholder="50000"
-                              />
-                              <p className="text-[9px] text-gray-400 mt-1">يتحول النظام إلى استنزاف تلقائي عندما يربح اللاعب أكثر من هذا المبلغ.</p>
-                          </div>
-                      )}
-
-                      {/* Luck Slider */}
-                      <div>
-                          <div className="flex justify-between text-xs text-gray-400 mb-1">
-                              <span>نسبة الحظ العشوائي</span>
-                              <span className="text-purple-400 font-bold">{roomLuck}%</span>
-                          </div>
-                          <input 
-                              type="range" 
-                              min="0" 
-                              max="100" 
-                              value={roomLuck} 
-                              onChange={(e) => setRoomLuckState(parseInt(e.target.value))}
-                              className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-purple-500"
-                          />
-                      </div>
-
-                  </div>
-
-                  <div className="flex gap-2">
-                      <button onClick={handleSaveGameConfig} disabled={actionLoading === 'config_save'} className="flex-1 bg-purple-600 hover:bg-purple-500 text-white py-2 rounded font-bold shadow-lg">
-                          {actionLoading === 'config_save' ? 'جاري الحفظ...' : 'حفظ الإعدادات'}
-                      </button>
-                      <button onClick={() => setShowGameConfigModal(null)} className="flex-1 bg-gray-700 text-white py-2 rounded">إلغاء</button>
                   </div>
               </div>
           </div>

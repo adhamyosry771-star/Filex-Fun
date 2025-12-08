@@ -301,10 +301,10 @@ const App: React.FC = () => {
 
   const getLevelInfo = (diamondsSpent: number = 0) => {
       let level = 1;
-      let requiredForNext = 1000; 
+      let requiredForNext = 100; 
 
-      for (let i = 1; i <= 500; i++) {
-          const threshold = Math.pow(i, 3) * 1000; 
+      for (let i = 1; i < 100; i++) {
+          const threshold = Math.pow(i, 3) * 100; 
           if (diamondsSpent >= threshold) {
               level = i;
           } else {
@@ -313,7 +313,7 @@ const App: React.FC = () => {
           }
       }
       
-      const prevThreshold = level === 1 ? 0 : Math.pow(level - 1, 3) * 1000;
+      const prevThreshold = level === 1 ? 0 : Math.pow(level - 1, 3) * 100;
       const progress = ((diamondsSpent - prevThreshold) / (requiredForNext - prevThreshold)) * 100;
       
       return { level, progress: Math.min(Math.max(progress, 0), 100), remaining: requiredForNext - diamondsSpent };

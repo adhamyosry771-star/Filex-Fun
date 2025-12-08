@@ -301,10 +301,10 @@ const App: React.FC = () => {
 
   const getLevelInfo = (diamondsSpent: number = 0) => {
       let level = 1;
-      let requiredForNext = 100; 
+      let requiredForNext = 1000; 
 
-      for (let i = 1; i < 100; i++) {
-          const threshold = Math.pow(i, 3) * 100; 
+      for (let i = 1; i <= 500; i++) {
+          const threshold = Math.pow(i, 3) * 1000; 
           if (diamondsSpent >= threshold) {
               level = i;
           } else {
@@ -313,7 +313,7 @@ const App: React.FC = () => {
           }
       }
       
-      const prevThreshold = level === 1 ? 0 : Math.pow(level - 1, 3) * 100;
+      const prevThreshold = level === 1 ? 0 : Math.pow(level - 1, 3) * 1000;
       const progress = ((diamondsSpent - prevThreshold) / (requiredForNext - prevThreshold)) * 100;
       
       return { level, progress: Math.min(Math.max(progress, 0), 100), remaining: requiredForNext - diamondsSpent };
@@ -385,7 +385,7 @@ const App: React.FC = () => {
         ) : <div />;
 
       case ViewState.ADMIN:
-        if (userProfile?.id === 'OFFECAL') {
+        if (userProfile?.id === 'OFFECAL' || authUser?.email === 'admin@flex.com') {
             return <AdminDashboard onBack={() => setCurrentView(ViewState.PROFILE)} language={language} />;
         }
         return <div />;
@@ -408,7 +408,7 @@ const App: React.FC = () => {
         const wealthIcon = getIconByLevel(wealthInfo.level, 'wealth');
         const charmIcon = getIconByLevel(charmInfo.level, 'charm');
 
-        const isOwner = userProfile.id === 'OFFECAL';
+        const isOwner = userProfile.id === 'OFFECAL' || authUser?.email === 'admin@flex.com';
 
         return (
           <div className="h-full bg-gray-900 text-white overflow-y-auto pb-24 relative font-sans">

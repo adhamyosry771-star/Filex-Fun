@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef, memo } from 'react';
-import { ArrowLeft, Send, Heart, Share2, Gift as GiftIcon, Users, Crown, Mic, MicOff, Lock, Unlock, Settings, Image as ImageIcon, X, Info, Minimize2, LogOut, BadgeCheck, Loader2, Upload, Shield, Trophy, Bot, Volume2, VolumeX, ArrowDownCircle, Ban, Trash2, UserCog, UserMinus, Zap, BarChart3, Gamepad2, Clock, LayoutGrid, Flag, Music, Play, Pause, SkipForward, SkipBack, Hexagon, ListMusic, Plus, Check, Search, Circle, CheckCircle2, KeyRound, MoreVertical, Grid, Sprout, Car, RotateCw, Coins, History, Hand } from 'lucide-react';
+import { ArrowLeft, Send, Heart, Share2, Gift as GiftIcon, Users, Crown, Mic, MicOff, Lock, Unlock, Settings, Image as ImageIcon, X, Info, Minimize2, LogOut, BadgeCheck, Loader2, Upload, Shield, Trophy, Bot, Volume2, VolumeX, ArrowDownCircle, Ban, Trash2, UserCog, UserMinus, Zap, BarChart3, Gamepad2, Clock, LayoutGrid, ListMusic, Plus, Check, Search, Circle, CheckCircle2, KeyRound, MoreVertical, Grid, Sprout, Car, RotateCw, Coins, History, Hand, Hexagon, Play, Pause, SkipForward, SkipBack, Music, Flag } from 'lucide-react';
 import { Room, ChatMessage, Gift, Language, User, RoomSeat } from '../types';
 import { GIFTS, STORE_ITEMS, ROOM_BACKGROUNDS, VIP_TIERS, ADMIN_ROLES } from '../constants';
 import { listenToMessages, sendMessage, takeSeat, leaveSeat, updateRoomDetails, sendGiftTransaction, toggleSeatLock, toggleSeatMute, decrementViewerCount, listenToRoom, kickUserFromSeat, banUserFromRoom, unbanUserFromRoom, removeRoomAdmin, addRoomAdmin, searchUserByDisplayId, enterRoom, exitRoom, listenToRoomViewers, getUserProfile, changeRoomSeatCount, updateWalletForGame } from '../services/firebaseService';
@@ -11,44 +11,12 @@ import { saveSongToDB, getSongsFromDB, deleteSongFromDB, SavedSong } from '../se
 import UserProfileModal from './UserProfileModal';
 import RoomLeaderboard from './RoomLeaderboard';
 import FullProfileView from './FullProfileView';
-
-// --- GAME CONSTANTS ---
-// Order: Top-Left -> Clockwise
-// 0: Orange, 1: Apple, 2: Lemon, 3: Peach, 4: Strawberry, 5: Mango, 6: Watermelon, 7: Cherry
-const FRUITS = [
-    { id: 0, icon: '🍊', multi: 5, color: 'bg-orange-500/20 border-orange-500/50', name: { en: 'Orange', ar: 'البرتقال' } },
-    { id: 1, icon: '🍎', multi: 5, color: 'bg-red-500/20 border-red-500/50', name: { en: 'Apple', ar: 'التفاح' } },
-    { id: 2, icon: '🍋', multi: 5, color: 'bg-yellow-400/20 border-yellow-400/50', name: { en: 'Lemon', ar: 'الليمون' } },
-    { id: 3, icon: '🍑', multi: 5, color: 'bg-pink-400/20 border-pink-400/50', name: { en: 'Peach', ar: 'الخوخ' } },
-    { id: 4, icon: '🍓', multi: 10, color: 'bg-rose-600/20 border-rose-600/50', name: { en: 'Strawberry', ar: 'الفراولة' } },
-    { id: 5, icon: '🥭', multi: 15, color: 'bg-amber-500/20 border-amber-500/50', name: { en: 'Mango', ar: 'المانجو' } },
-    { id: 6, icon: '🍉', multi: 25, color: 'bg-green-500/20 border-green-500/50', name: { en: 'Watermelon', ar: 'البطيخ' } },
-    { id: 7, icon: '🍒', multi: 45, color: 'bg-red-700/20 border-red-700/50', name: { en: 'Cherry', ar: 'الكرز' } },
-];
-
-// Chips: 1K, 10K, 100K
-const CHIPS = [1000, 10000, 100000];
-
-// Grid Mapping for 3x3 Layout
-// [0] [1] [2]
-// [7] [T] [3]
-// [6] [5] [4]
-const GRID_MAP = [
-    0, 1, 2,
-    7, -1, 3, // -1 is Timer
-    6, 5, 4
-];
+import { FruitWarGame } from './FruitWarGame';
 
 // --- HELPER FUNCTIONS ---
 const getFrameClass = (id?: string | null) => {
     if (!id) return 'border border-white/20';
     return STORE_ITEMS.find(i => i.id === id)?.previewClass || 'border border-white/20';
-};
-
-const formatNumber = (num: number) => {
-    if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
-    if (num >= 1000) return (num / 1000).toFixed(0) + 'k';
-    return num.toString();
 };
 
 // --- MEMOIZED SEAT COMPONENT ---
@@ -169,21 +137,9 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
   const [showOptionsMenu, setShowOptionsMenu] = useState(false);
   const [showGamesModal, setShowGamesModal] = useState(false);
   
-  // FRUIT WAR STATE
+  // FRUIT WAR STATE (Simplified - Logic moved to sub-component)
   const [showFruitWar, setShowFruitWar] = useState(false);
-  const [fwBets, setFwBets] = useState<Record<number, number>>({});
-  const fwBetsRef = useRef<Record<number, number>>({}); // Ref to track bets in closure
-  const [fwChip, setFwChip] = useState(1000);
-  const [fwHighlight, setFwHighlight] = useState(0);
-  const [fwState, setFwState] = useState<'BETTING' | 'SPINNING' | 'RESULT'>('BETTING');
-  const [fwTimer, setFwTimer] = useState(45);
-  const [fwHistory, setFwHistory] = useState<number[]>([]);
-  const [fwWinner, setFwWinner] = useState<number | null>(null);
-  const [fwResultData, setFwResultData] = useState<{winAmount: number, isWinner: boolean} | null>(null);
   
-  // Visual Balance for Instant Feedback
-  const [visualBalance, setVisualBalance] = useState(currentUser.wallet?.diamonds || 0);
-
   const [showMusicMiniPlayer, setShowMusicMiniPlayer] = useState(false);
   const [showMusicPlaylist, setShowMusicPlaylist] = useState(false);
   const [showImportView, setShowImportView] = useState(false);
@@ -238,18 +194,8 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
   const currentUserRef = useRef(currentUser);
   useEffect(() => { 
       currentUserRef.current = currentUser; 
-      // Update visual balance if it comes from external source (like gift received)
-      // We check if difference is large to avoid overriding optimistic updates with old server data during rapid betting
-      // But for simplicity, we just sync.
-      setVisualBalance(currentUser.wallet?.diamonds || 0);
   }, [currentUser]);
 
-  // Sync bets ref
-  useEffect(() => {
-      fwBetsRef.current = fwBets;
-  }, [fwBets]);
-
-  // Moved t function definition here to be accessible by startFruitSpin
   const t = (key: string) => {
     const dict: Record<string, { ar: string, en: string }> = {
       placeholder: { ar: 'اكتب رسالة...', en: 'Type a message...' },
@@ -354,189 +300,6 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
     return dict[key]?.[language] || key;
   };
 
-  // --- FRUIT WAR GAME LOOP ---
-  useEffect(() => {
-      let interval: any;
-      if (showFruitWar) {
-          interval = setInterval(() => {
-              setFwTimer(prev => {
-                  if (prev <= 0) {
-                      if (fwState === 'BETTING') {
-                          // End Betting -> Start Spin
-                          setFwState('SPINNING');
-                          startFruitSpin();
-                          return 10; // Wait time while spinning
-                      } else if (fwState === 'SPINNING') {
-                           // Transition handled by startFruitSpin timing
-                           return 0; 
-                      } else {
-                          // RESULT (5s) -> BETTING (45s)
-                          setFwState('BETTING');
-                          setFwWinner(null);
-                          setFwBets({});
-                          setFwResultData(null);
-                          return 45; // 45s Betting Time
-                      }
-                  }
-                  return prev - 1;
-              });
-          }, 1000);
-      }
-      return () => clearInterval(interval);
-  }, [showFruitWar, fwState]);
-
-  const startFruitSpin = () => {
-      let currentIdx = fwHighlight;
-      
-      // --- RIGGING LOGIC (Advanced) ---
-      const mode = room.gameMode || 'FAIR';
-      const luck = room.gameLuck !== undefined ? room.gameLuck : 50;
-      const roll = Math.random() * 100;
-      let winnerIndex = -1;
-
-      // Calculate user's bets
-      const userBets = fwBetsRef.current;
-      const betIndices = Object.keys(userBets).map(Number);
-      const allIndices = [0, 1, 2, 3, 4, 5, 6, 7];
-      const safeIndices = allIndices.filter(i => !betIndices.includes(i)); // Fruits user did NOT bet on
-      const winningIndices = betIndices; // Fruits user bet on
-
-      // ALGORITHM SWITCH
-      if (mode === 'DRAIN') {
-          // --- DRAIN MODE (Kill) ---
-          // Aggressively force loss if user bet. 
-          // 90% chance to lose if safe options exist.
-          if (betIndices.length > 0 && safeIndices.length > 0 && Math.random() < 0.9) {
-              winnerIndex = safeIndices[Math.floor(Math.random() * safeIndices.length)];
-          } else {
-              // Fallback to random if user bet on nothing or everything (unlikely)
-              winnerIndex = Math.floor(Math.random() * 8);
-          }
-      } else if (mode === 'HOOK') {
-          // --- HOOK MODE (Bait & Switch) ---
-          const currentDailyProfit = currentUserRef.current.dailyProfit || 0;
-          const threshold = room.hookThreshold || 50000;
-
-          if (currentDailyProfit >= threshold) {
-              // TRAP SNAP: User won enough, now drain them.
-              if (betIndices.length > 0 && safeIndices.length > 0) {
-                  // Force loss
-                  winnerIndex = safeIndices[Math.floor(Math.random() * safeIndices.length)];
-              } else {
-                  winnerIndex = Math.floor(Math.random() * 8);
-              }
-          } else {
-              // BAIT PHASE: Let them win (80% chance)
-              if (betIndices.length > 0 && Math.random() < 0.8) {
-                  // Pick a winning fruit!
-                  winnerIndex = winningIndices[Math.floor(Math.random() * winningIndices.length)];
-              } else {
-                  winnerIndex = Math.floor(Math.random() * 8);
-              }
-          }
-      } else {
-          // --- FAIR MODE (Legacy/Random) ---
-          if (betIndices.length > 0 && roll > luck && safeIndices.length > 0) {
-              // Standard luck check based on slider
-              winnerIndex = safeIndices[Math.floor(Math.random() * safeIndices.length)];
-          } else {
-              winnerIndex = Math.floor(Math.random() * 8);
-          }
-      }
-
-      // Ensure winnerIndex is set (fallback for edge cases)
-      if (winnerIndex === -1) winnerIndex = Math.floor(Math.random() * 8);
-
-      // ---------------------
-
-      // Animation Configuration for EXACTLY 5 seconds (5000ms)
-      const totalDuration = 5000;
-      const rounds = 4; // Spin around 4 times
-      const totalSteps = (rounds * 8) + ((winnerIndex - currentIdx + 8) % 8);
-      
-      let step = 0;
-      
-      const runStep = () => {
-          if (step >= totalSteps) {
-              // FINISHED
-              setFwState('RESULT');
-              setFwWinner(winnerIndex);
-              setFwTimer(5); // 5 seconds to show result
-
-              const betAmount = fwBetsRef.current[winnerIndex] || 0;
-              let winAmount = 0;
-              
-              if (betAmount > 0) {
-                  winAmount = betAmount * FRUITS[winnerIndex].multi;
-                  // Only update DB for WINNINGS (Bets already deducted instantly)
-                  if (currentUserRef.current.uid) {
-                      updateWalletForGame(currentUserRef.current.uid, winAmount);
-                  }
-                  // Visual Update
-                  setVisualBalance(prev => prev + winAmount);
-              }
-              
-              // Set RESULT DATA for Popup (SHOWS CURRENT WIN ONLY)
-              setFwResultData({ winAmount, isWinner: winAmount > 0 });
-              setFwHistory(prev => [winnerIndex, ...prev].slice(0, 10));
-              return;
-          }
-
-          step++;
-          currentIdx = (currentIdx + 1) % 8;
-          setFwHighlight(currentIdx);
-
-          let delay = 50; 
-          if (totalSteps - step < 5) delay = 300; 
-          else if (totalSteps - step < 10) delay = 150;
-          else if (totalSteps - step < 20) delay = 80;
-          else delay = 40; 
-          
-          setTimeout(runStep, delay);
-      };
-
-      runStep();
-  };
-
-  const handleFruitBet = (fruitId: number) => {
-      if (fwState !== 'BETTING') return;
-      
-      // 1. Check VISUAL Balance (Optimistic Check)
-      if (visualBalance < fwChip) {
-          alert(t('noFunds'));
-          return;
-      }
-      
-      // 2. Limit to 6 unique fruits
-      const currentBetFruits = Object.keys(fwBets);
-      if (!fwBets[fruitId] && currentBetFruits.length >= 6) {
-          alert(language === 'ar' ? 'يمكنك الرهان على 6 فواكه فقط كحد أقصى!' : 'Max 6 fruits allowed!');
-          return;
-      }
-
-      // 3. Update Visual State (Instant)
-      setVisualBalance(prev => prev - fwChip);
-      setFwBets(prev => ({
-          ...prev,
-          [fruitId]: (prev[fruitId] || 0) + fwChip
-      }));
-
-      // 4. Background Server Update (Fire & Forget to avoid hanging)
-      if (currentUser.uid) {
-          updateWalletForGame(currentUser.uid, -fwChip).catch(err => {
-              console.error("Bet failed", err);
-              // Rollback visual state if network fails
-              setVisualBalance(prev => prev + fwChip);
-              setFwBets(prev => ({
-                  ...prev,
-                  [fruitId]: (prev[fruitId] || fwChip) - fwChip
-              }));
-          });
-      }
-  };
-
-  // ... (Keeping all existing useEffects logic for Music, Room Sync, Volume, etc.)
-  
   useEffect(() => {
       const loadMusic = async () => {
           const savedSongs = await getSongsFromDB();
@@ -566,7 +329,7 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
       return () => clearInterval(interval);
   }, [isMusicPlaying, musicDuration]);
 
-  // ... (Skipping verbose data fetching logic for brevity, it's unchanged) ...
+  // ... (Data Fetching Logic for Settings) ...
   useEffect(() => {
       const fetchSettingsData = async () => {
           if (!showRoomSettings) return;
@@ -623,7 +386,7 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
       }, 3000);
   };
 
-  // ... (Sync, Volume, Join logic) ...
+  // ... (Agora & Room Sync) ...
   useEffect(() => {
       const uid = currentUser.uid;
       const agoraUid = currentUser.uid || currentUser.id;
@@ -688,7 +451,6 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
       return () => unsubscribe();
   }, [initialRoom.id, onAction, showRoomSettings, currentUser.uid, currentUser.id]);
 
-  // ... (Seat Loading Fix & Mic Publish Logic) ...
   useEffect(() => {
       const myCurrentSeat = room.seats.find(s => s.userId === currentUser.id);
       if (myCurrentSeat && loadingSeatRef.current === myCurrentSeat.index) { setLoadingSeatIndex(null); loadingSeatRef.current = null; }
@@ -699,7 +461,6 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
       else if (loadingSeatIndex === null) { unpublishMicrophone().catch(console.warn); }
   }, [amISeated, mySeatMuted, loadingSeatIndex, mySeatIndex]);
 
-  // ... (Message Listener & AI Logic) ...
   useEffect(() => {
      if (!room || !room.id) return;
      joinTimestamp.current = Date.now();
@@ -731,7 +492,6 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
       }
   }, [messages, isHost, isAiEnabled, room.id, currentUser.id]);
 
-  // ... (Other handlers unchanged, skipping to Games logic) ...
   const handleInitialFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
       const files = e.target.files;
       if (files && files.length > 0) {
@@ -856,9 +616,8 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
           </div>
       ))}
 
-      {/* ... (Header and Seat Grid remain identical) ... */}
+      {/* HEADER */}
       <div className="relative z-50 pt-safe-top px-3 pb-2 flex items-center justify-between gap-2 bg-gradient-to-b from-black/80 to-transparent w-full shrink-0 h-[60px]">
-        {/* ... (Header content unchanged) ... */}
         {/* RIGHT SIDE (Start in RTL) - Room Info */}
         <div className="flex items-center gap-2 min-w-0 flex-1 overflow-hidden">
             <div onClick={() => setShowRoomInfoModal(true)} className="flex items-center gap-2 bg-black/30 backdrop-blur px-2 py-1 rounded-xl border border-white/10 min-w-0 max-w-full cursor-pointer hover:bg-black/40 transition active:scale-95">
@@ -895,6 +654,7 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
         <Trophy className="w-3 h-3"/> {t('cup')}
       </button>
 
+      {/* SEATS GRID */}
       <div className="relative z-10 w-full px-2 pt-1 pb-1 shrink-0 flex flex-col items-center">
           <div className="flex justify-center mb-2 shrink-0">
              {seats.slice(0, 1).map((seat) => (
@@ -948,7 +708,6 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
           {/* Chat Area */}
           <div className="flex-1 overflow-y-auto px-4 space-y-2 scrollbar-hide pb-2 mask-image-gradient relative w-full">
               
-              {/* RESTORED: Pinned Message */}
               <div className="bg-white/5 border border-white/10 rounded-xl p-3 backdrop-blur-md">
                   <p className="text-[10px] text-brand-300 font-bold mb-1 flex items-center gap-1">
                       <Info className="w-3 h-3" />
@@ -1019,6 +778,7 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
 
           {floatingHearts.map((h) => (<Heart key={h.id} className="absolute bottom-20 w-6 h-6 text-pink-500 fill-pink-500 animate-float pointer-events-none z-50 drop-shadow-lg" style={{ left: `${h.left}%` }}/>))}
 
+          {/* BOTTOM CONTROLS */}
           <div className="p-3 bg-black/60 backdrop-blur-md border-t border-white/10 flex items-center gap-3 shrink-0">
               <button onClick={handleToggleMyMute} className={`p-2 rounded-full shadow-lg transition duration-75 active:scale-95 ${mySeat?.isMuted ? 'bg-red-500 text-white' : 'bg-white/10 text-white hover:bg-white/20'}`}>{mySeat?.isMuted ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}</button>
               <button onClick={handleToggleSpeaker} className={`p-2 rounded-full shadow-lg transition ${isSpeakerMuted ? 'bg-gray-700 text-gray-400' : 'bg-white/10 text-brand-400 hover:bg-white/20'}`}>{isSpeakerMuted ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}</button>
@@ -1031,7 +791,7 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
           </div>
       </div>
 
-      {/* MODALS */}
+      {/* --- MENU MODAL --- */}
       {showOptionsMenu && (
           <div className="absolute inset-0 z-[70] flex flex-col justify-end bg-black/60 backdrop-blur-sm animate-in slide-in-from-bottom-10" onClick={() => setShowOptionsMenu(false)}>
               <div className="bg-gray-900/30 backdrop-blur-3xl border-t border-white/20 rounded-t-3xl p-5 shadow-2xl" onClick={e => e.stopPropagation()}>
@@ -1132,169 +892,18 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
           </div>
       )}
 
-      {/* FRUIT WAR GAME BOTTOM SHEET */}
+      {/* --- FRUIT WAR GAME MODAL --- */}
       {showFruitWar && (
-          <div className="absolute inset-0 z-[100] flex flex-col justify-end bg-black/60 backdrop-blur-sm animate-in slide-in-from-bottom-10" onClick={() => setShowFruitWar(false)}>
-              <div className="bg-[#2a1d45] border-t border-purple-500/30 rounded-t-3xl p-4 shadow-2xl relative w-full overflow-hidden" onClick={e => e.stopPropagation()}>
-                  
-                  {/* Separate Header to avoid overlap */}
-                  <div className="flex flex-col gap-2 mb-2 px-1 w-full">
-                      {/* Top Row: Title + Close */}
-                      <div className="flex justify-between items-center w-full">
-                           <div className="text-white font-black text-lg drop-shadow-lg flex items-center gap-2">
-                              <Gamepad2 className="w-5 h-5 text-purple-400"/>
-                              {fwState === 'RESULT' ? t('win') : t('fruitWar')}
-                          </div>
-                          <button onClick={() => setShowFruitWar(false)} className="p-1.5 bg-white/10 rounded-full hover:bg-white/20 text-white transition">
-                              <X className="w-4 h-4"/>
-                          </button>
-                      </div>
-
-                      {/* Second Row: Balance (Using Optimistic Visual Balance) */}
-                      <div className="flex justify-center w-full">
-                          <div className="flex items-center gap-2 bg-black/30 rounded-full px-4 py-1.5 border border-white/10 shadow-inner">
-                              <div className="w-5 h-5 rounded-full bg-gradient-to-r from-purple-500 to-pink-500 flex items-center justify-center text-[10px] font-bold text-white">
-                                  💎
-                              </div>
-                              <span className="text-yellow-400 font-bold font-mono text-sm tracking-wider">
-                                  {visualBalance.toLocaleString()}
-                              </span>
-                          </div>
-                      </div>
-                  </div>
-
-                  {/* RESULT OVERLAY WINDOW */}
-                  {fwState === 'RESULT' && fwResultData && (
-                      <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-sm animate-in fade-in zoom-in duration-300 rounded-t-3xl">
-                          <div className="bg-gradient-to-b from-purple-900 to-black border border-yellow-500/50 p-6 rounded-3xl shadow-2xl text-center max-w-[80%] flex flex-col items-center">
-                              <h2 className="text-yellow-400 font-bold text-lg mb-2">الفاكهة الفائزة هي</h2>
-                              <div className="text-6xl mb-4 filter drop-shadow-[0_0_20px_rgba(255,255,255,0.5)] animate-bounce">
-                                  {FRUITS[fwWinner!].icon}
-                              </div>
-                              <h3 className="text-white font-bold text-xl mb-4">{FRUITS[fwWinner!].name[language]}</h3>
-                              
-                              <div className="w-full h-px bg-white/20 mb-4"></div>
-                              
-                              {fwResultData.isWinner ? (
-                                  <div className="animate-pulse">
-                                      <p className="text-green-400 font-bold text-sm mb-1">مبروك كسبت</p>
-                                      <p className="text-yellow-300 font-black text-2xl drop-shadow-md">
-                                          {fwResultData.winAmount.toLocaleString()} 💎
-                                      </p>
-                                  </div>
-                              ) : (
-                                  <div>
-                                      <p className="text-gray-400 font-bold text-sm">للأسف لم تحصل على شيء</p>
-                                      <p className="text-gray-500 text-xs mt-1">حظ أوفر في المرة القادمة</p>
-                                  </div>
-                              )}
-                          </div>
-                      </div>
-                  )}
-
-                  {/* 3x3 Grid Layout - Clean Design */}
-                  <div className="grid grid-cols-3 gap-2 p-2 relative bg-[#1a1128] rounded-2xl border border-purple-500/20 shadow-inner mb-3">
-                      {GRID_MAP.map((fruitIdx, i) => {
-                          // Center Cell is Timer
-                          if (fruitIdx === -1) {
-                              return (
-                                  <div key="timer" className="aspect-square rounded-xl bg-black/50 border-2 border-yellow-500/50 flex flex-col items-center justify-center relative overflow-hidden shadow-[inset_0_0_20px_rgba(0,0,0,0.5)]">
-                                      {/* LED Dots Border Effect */}
-                                      <div className="absolute inset-1 border border-dotted border-white/20 rounded-lg"></div>
-                                      
-                                      <span className={`text-4xl font-black font-mono tracking-widest drop-shadow-[0_0_10px_rgba(234,179,8,0.8)] ${fwTimer <= 10 && fwState === 'BETTING' ? 'text-red-500 animate-pulse' : 'text-yellow-400'}`}>
-                                          {fwTimer < 10 ? `0${fwTimer}` : fwTimer}
-                                      </span>
-                                      <span className="text-[8px] text-white/50 uppercase tracking-widest mt-1">
-                                          {fwState === 'BETTING' ? 'Betting' : 'Spinning'}
-                                      </span>
-                                  </div>
-                              );
-                          }
-
-                          const fruit = FRUITS[fruitIdx];
-                          const isActive = fwHighlight === fruitIdx;
-                          const isWinner = fwWinner === fruitIdx && fwState === 'RESULT';
-                          const myBet = fwBets[fruitIdx] || 0;
-
-                          return (
-                              <div 
-                                  key={fruit.id}
-                                  onClick={() => handleFruitBet(fruitIdx)}
-                                  className={`
-                                      relative aspect-square rounded-xl flex flex-col items-center justify-center cursor-pointer transition-all duration-150 border-2 overflow-hidden
-                                      ${isWinner ? 'bg-yellow-500 border-yellow-300 scale-105 shadow-[0_0_20px_gold] z-10' : isActive ? 'border-4 border-cyan-400 bg-cyan-900/40 z-10 shadow-[0_0_20px_rgba(34,211,238,0.8)] scale-105' : 'bg-[#2a1d45] border-purple-500/30 hover:brightness-125'}
-                                      ${fwState !== 'BETTING' ? 'cursor-not-allowed opacity-90' : 'active:scale-95'}
-                                  `}
-                              >
-                                  {/* Top Right: My Bet Badge - Clean look */}
-                                  {myBet > 0 && (
-                                      <div className="absolute top-1 right-1 bg-yellow-500 text-black text-[8px] font-black px-1.5 rounded-md border border-white shadow-sm z-20 min-w-[20px] text-center leading-tight">
-                                          {formatNumber(myBet)}
-                                      </div>
-                                  )}
-
-                                  {/* Center: Fruit Icon */}
-                                  <div className="text-4xl filter drop-shadow-md mb-3 transform transition-transform duration-300 hover:scale-110">{fruit.icon}</div>
-                                  
-                                  {/* Bottom: Multiplier Badge */}
-                                  <div className="absolute bottom-1 left-1/2 -translate-x-1/2 bg-black/60 px-2 py-0.5 rounded-full border border-white/10 w-[80%] flex justify-center">
-                                      <span className="text-[10px] font-black text-white">x{fruit.multi}</span>
-                                  </div>
-                              </div>
-                          );
-                      })}
-                  </div>
-
-                  {/* Betting Controls */}
-                  <div className="bg-[#1a1128] rounded-xl p-2 mb-2 border border-purple-500/20">
-                      <div className="flex justify-between items-center mb-2 px-2">
-                          <span className="text-[10px] text-gray-400 uppercase tracking-widest">{t('lastRound')}</span>
-                          <div className="flex gap-1">
-                              {fwHistory.map((h, i) => (
-                                  <div key={i} className="w-5 h-5 rounded-full bg-white/10 flex items-center justify-center text-xs border border-white/10 shadow-sm">
-                                      {FRUITS[h].icon}
-                                  </div>
-                              ))}
-                          </div>
-                      </div>
-                      
-                      <div className="flex justify-around items-center gap-2">
-                          {CHIPS.map(amount => (
-                              <button 
-                                  key={amount}
-                                  onClick={() => setFwChip(amount)}
-                                  disabled={fwState !== 'BETTING'}
-                                  className={`
-                                      relative w-14 h-14 rounded-full flex flex-col items-center justify-center font-black text-[10px] border-4 transition-transform active:scale-90 shadow-lg
-                                      ${fwChip === amount ? 'scale-110 -translate-y-1 z-10 ring-2 ring-white ring-offset-2 ring-offset-[#2a1d45]' : 'opacity-80 hover:opacity-100'}
-                                      ${amount === 1000 ? 'bg-cyan-600 border-cyan-400 text-white' : ''}
-                                      ${amount === 10000 ? 'bg-purple-600 border-purple-400 text-white' : ''}
-                                      ${amount === 100000 ? 'bg-orange-600 border-orange-400 text-white' : ''}
-                                      ${amount === 1000000 ? 'bg-yellow-600 border-yellow-400 text-white' : ''}
-                                  `}
-                              >
-                                  <div className="absolute inset-0 rounded-full bg-gradient-to-b from-white/20 to-transparent"></div>
-                                  <span>{formatNumber(amount)}</span>
-                                  <Coins className="w-3 h-3 text-white/80"/>
-                              </button>
-                          ))}
-                      </div>
-                  </div>
-
-                  {/* User Total Bet Display */}
-                  <div className="flex justify-between items-center px-4 py-3 bg-black/40 rounded-xl border border-white/5 shadow-md">
-                      <div className="flex flex-col items-center w-1/2 border-r border-white/10">
-                          <span className="text-[10px] text-gray-400 mb-0.5">{t('bet')}</span>
-                          <span className="text-yellow-400 font-black text-lg tracking-wider">{formatNumber((Object.values(fwBets) as number[]).reduce((a: number, b: number) => a + b, 0))}</span>
-                      </div>
-                      <div className="flex flex-col items-center w-1/2">
-                          <span className="text-[10px] text-gray-400 mb-0.5">{t('dailyProfit')}</span>
-                          <span className="text-green-400 font-black text-lg tracking-wider">{(currentUser.dailyProfit || 0).toLocaleString()}</span>
-                      </div>
-                  </div>
-              </div>
-          </div>
+          <FruitWarGame 
+              room={room}
+              currentUser={currentUser}
+              language={language}
+              onClose={() => setShowFruitWar(false)}
+              onUpdateBalance={(newVal) => {
+                  // Only update the local ref/state if needed, though Firebase hook will eventually catch up.
+                  // This callback can be used to sync balance display if Game is isolated.
+              }}
+          />
       )}
 
       {showRoomInfoModal && (
@@ -1348,7 +957,7 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
           </div>
       )}
 
-      {/* OTHER MODALS (Music, Gift, Exit, etc.) - Preserved */}
+      {/* --- MUSIC MODAL --- */}
       {showMusicMiniPlayer && (
           <div className="absolute inset-0 z-[80] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4 animate-in fade-in">
               <div className="w-80 bg-gray-900/30 backdrop-blur-2xl border border-white/20 rounded-[2rem] p-6 shadow-2xl flex flex-col items-center relative overflow-hidden ring-1 ring-white/10">

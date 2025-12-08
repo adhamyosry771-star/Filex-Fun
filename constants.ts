@@ -1,3 +1,4 @@
+
 import { Room, User, Gift, StoreItem, VipTier, Game } from './types';
 
 export const CURRENT_USER: User = {
@@ -5,13 +6,13 @@ export const CURRENT_USER: User = {
   id: 'u1',
   name: 'FlexMaster',
   avatar: 'https://picsum.photos/seed/me/200/200',
-  level: 12,
-  diamondsSpent: 154000,
-  diamondsReceived: 50000,
+  level: 99, // Explicitly set to 99
+  diamondsSpent: 970300000, // Enough for Level 99 (Formula: 99^3 * 1000 = ~970M)
+  diamondsReceived: 970300000, // Matching Charm Level 99
   vip: true,
   vipLevel: 1,
   wallet: {
-    diamonds: 2500000,
+    diamonds: 5000000, // Spendable balance
     coins: 0
   },
   equippedFrame: 'frame_1',
@@ -71,30 +72,38 @@ export const COUNTRIES = [
 
 export const LEVEL_ICONS = [
     { min: 0, icon: '🛡️', color: 'bg-gray-500' },
-    { min: 10, icon: '⚔️', color: 'bg-blue-500' },
-    { min: 20, icon: '💎', color: 'bg-cyan-500' },
-    { min: 30, icon: '👑', color: 'bg-purple-500' },
+    { min: 10, icon: '⚔️', color: 'bg-blue-600' },
+    { min: 20, icon: '💎', color: 'bg-cyan-600' },
+    { min: 30, icon: '👑', color: 'bg-purple-600' },
     { min: 40, icon: '🌟', color: 'bg-yellow-500' },
     { min: 50, icon: '🔥', color: 'bg-orange-500' },
     { min: 60, icon: '🦁', color: 'bg-red-500' },
-    { min: 70, icon: '🐲', color: 'bg-red-700' },
-    { min: 80, icon: '⚡', color: 'bg-amber-400' },
-    { min: 90, icon: '🔱', color: 'bg-rose-600' },
-    { min: 100, icon: '🪐', color: 'bg-indigo-600' },
+    { min: 80, icon: '⚡', color: 'bg-amber-600' },
+    { min: 90, icon: '🔱', color: 'bg-rose-700 border border-rose-400' },
+    { min: 100, icon: '💠', color: 'bg-gradient-to-r from-blue-600 to-cyan-500 border border-cyan-300 shadow-lg' },
+    { min: 150, icon: '🦅', color: 'bg-gradient-to-r from-slate-700 to-slate-900 border border-slate-400 shadow-[0_0_10px_rgba(148,163,184,0.5)]' },
+    { min: 200, icon: '🪐', color: 'bg-gradient-to-r from-indigo-600 to-purple-900 border border-indigo-400 shadow-[0_0_15px_rgba(99,102,241,0.6)]' },
+    { min: 300, icon: '☄️', color: 'bg-gradient-to-r from-orange-600 to-red-900 border border-orange-400 shadow-[0_0_15px_rgba(249,115,22,0.6)]' },
+    { min: 400, icon: '🐲', color: 'bg-gradient-to-r from-emerald-600 to-teal-900 border border-emerald-400 shadow-[0_0_20px_rgba(16,185,129,0.7)]' },
+    { min: 500, icon: '👑', color: 'bg-gradient-to-r from-yellow-500 via-red-500 to-black border-2 border-yellow-300 shadow-[0_0_25px_gold] animate-pulse' },
 ];
 
 export const CHARM_ICONS = [
     { min: 0, icon: '💙', color: 'bg-blue-400' },
-    { min: 10, icon: '💖', color: 'bg-pink-400' },
+    { min: 10, icon: '💖', color: 'bg-pink-500' },
     { min: 20, icon: '🌹', color: 'bg-rose-500' },
-    { min: 30, icon: '🦋', color: 'bg-purple-400' },
+    { min: 30, icon: '🦋', color: 'bg-purple-500' },
     { min: 40, icon: '🦄', color: 'bg-fuchsia-500' },
-    { min: 50, icon: '🌈', color: 'bg-sky-400' },
+    { min: 50, icon: '🌈', color: 'bg-sky-500' },
     { min: 60, icon: '🎸', color: 'bg-red-500' },
-    { min: 70, icon: '🎤', color: 'bg-indigo-500' },
-    { min: 80, icon: '💃', color: 'bg-pink-600' },
-    { min: 90, icon: '🧞', color: 'bg-violet-600' },
-    { min: 100, icon: '🧜‍♀️', color: 'bg-cyan-500' },
+    { min: 80, icon: '💃', color: 'bg-indigo-600' },
+    { min: 90, icon: '🧜‍♀️', color: 'bg-cyan-600 border border-cyan-300' },
+    { min: 100, icon: '✨', color: 'bg-gradient-to-r from-fuchsia-500 to-purple-600 border border-fuchsia-300 shadow-lg' },
+    { min: 150, icon: '🧚', color: 'bg-gradient-to-r from-pink-600 to-purple-800 border border-pink-300 shadow-[0_0_10px_rgba(236,72,153,0.5)]' },
+    { min: 200, icon: '👸', color: 'bg-gradient-to-r from-fuchsia-600 to-rose-900 border border-fuchsia-300 shadow-[0_0_15px_rgba(217,70,239,0.6)]' },
+    { min: 300, icon: '👼', color: 'bg-gradient-to-r from-sky-500 to-blue-900 border border-sky-300 shadow-[0_0_15px_rgba(14,165,233,0.6)]' },
+    { min: 400, icon: '🧞', color: 'bg-gradient-to-r from-violet-600 to-indigo-900 border border-violet-300 shadow-[0_0_20px_rgba(139,92,246,0.7)]' },
+    { min: 500, icon: '💎', color: 'bg-gradient-to-r from-cyan-400 via-blue-600 to-black border-2 border-cyan-200 shadow-[0_0_25px_cyan] animate-pulse' },
 ];
 
 export const ROOM_BACKGROUNDS = [

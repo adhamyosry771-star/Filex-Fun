@@ -33,11 +33,6 @@ const FullProfileView: React.FC<FullProfileViewProps> = ({ user: initialUser, on
   useEffect(() => {
       const currentUserUid = auth.currentUser?.uid;
       if (currentUserUid && initialUser.uid && currentUserUid !== initialUser.uid) {
-          // We need the current user's details to record the visit. 
-          // Assuming auth.currentUser has basic info or we fetch it. 
-          // For simplicity/speed, we use basic auth info or placeholder if profile not loaded in context here.
-          // Better approach: Pass currentUser full object to this component. 
-          // But to be safe with existing props:
           const visitor: User = {
               uid: currentUserUid,
               id: 'visitor', // Placeholder, service will update if needed or ignored
@@ -64,9 +59,9 @@ const FullProfileView: React.FC<FullProfileViewProps> = ({ user: initialUser, on
 
   const getLevel = (amount: number = 0) => {
       let level = 1;
-      for (let i = 1; i < 100; i++) {
-          // Use simple multiplication instead of Math.pow to avoid potential type issues
-          if (amount >= (i * i * i * 100)) level = i;
+      for (let i = 1; i <= 500; i++) {
+          const threshold = Math.pow(i, 3) * 1000; 
+          if (amount >= threshold) level = i;
           else break;
       }
       return level;

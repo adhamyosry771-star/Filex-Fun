@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { ShieldCheck, ArrowLeft, Megaphone, Inbox, Clock, ChevronRight, UserPlus, Check, X, MessageCircle } from 'lucide-react';
 import { Language, Notification, FriendRequest, PrivateChatSummary } from '../types';
-import { listenToNotifications, listenToFriendRequests, acceptFriendRequest, rejectFriendRequest, listenToChatList, markSystemNotificationsRead, listenToUnreadNotifications } from '../services/firebaseService';
+import { listenToNotifications, listenToFriendRequests, acceptFriendRequest, rejectFriendRequest, listenToChatList, markSystemNotificationsRead, listenToUnreadNotifications, getUserProfile, sendPrivateMessage } from '../services/firebaseService';
 import { auth } from '../firebaseConfig';
 import PrivateChatView from './PrivateChatView'; // Not used here directly, handled by App usually, but for internal logic check
 
@@ -92,12 +92,42 @@ const MessagesView: React.FC<MessagesViewProps> = ({ language, onOpenChat }) => 
       }
   }, [subView]);
 
-  const handleRequestAction = async (targetUid: string, action: 'accept' | 'reject') => {
+  const handleRequestAction = async (targetReq: FriendRequest, action: 'accept' | 'reject') => {
       if (!auth.currentUser) return;
+      const myUid = auth.currentUser.uid;
+
       if (action === 'accept') {
-          await acceptFriendRequest(auth.currentUser.uid, targetUid);
+          // 1. Accept Friend Request in DB
+          await acceptFriendRequest(myUid, targetReq.uid);
+
+          // 2. Automatically Send a Message to start the chat
+          // Fetch my profile to get correct name/avatar
+          const myProfile = await getUserProfile(myUid);
+          
+          if (myProfile) {
+              const sender = {
+                  uid: myUid,
+                  name: myProfile.name,
+                  avatar: myProfile.avatar,
+                  frameId: myProfile.equippedFrame,
+                  bubbleId: myProfile.equippedBubble
+              };
+              const receiver = {
+                  uid: targetReq.uid,
+                  name: targetReq.name,
+                  avatar: targetReq.avatar
+              };
+
+              const welcomeText = language === 'ar' 
+                  ? 'لقد قبلت طلب الصداقة الخاص بك، هيا ندردش! 👋' 
+                  : 'I accepted your friend request, let\'s chat! 👋';
+
+              // This creates the chat entries and sends the first message
+              await sendPrivateMessage(sender, receiver, welcomeText);
+          }
+
       } else {
-          await rejectFriendRequest(auth.currentUser.uid, targetUid);
+          await rejectFriendRequest(myUid, targetReq.uid);
       }
   };
 
@@ -127,8 +157,8 @@ const MessagesView: React.FC<MessagesViewProps> = ({ language, onOpenChat }) => 
                             </div>
                         </div>
                         <div className="flex gap-2">
-                             <button onClick={() => handleRequestAction(req.uid, 'reject')} className="p-2 bg-red-500/10 text-red-500 rounded-full"><X className="w-5 h-5"/></button>
-                             <button onClick={() => handleRequestAction(req.uid, 'accept')} className="p-2 bg-green-500/10 text-green-500 rounded-full"><Check className="w-5 h-5"/></button>
+                             <button onClick={() => handleRequestAction(req, 'reject')} className="p-2 bg-red-500/10 text-red-500 rounded-full"><X className="w-5 h-5"/></button>
+                             <button onClick={() => handleRequestAction(req, 'accept')} className="p-2 bg-green-500/10 text-green-500 rounded-full"><Check className="w-5 h-5"/></button>
                         </div>
                     </div>
                 ))}

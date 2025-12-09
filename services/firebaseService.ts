@@ -40,7 +40,8 @@ import {
   StoreItem,
   RoomSeat,
   Visitor,
-  RelatedUser
+  RelatedUser,
+  WealthTransaction
 } from '../types';
 
 // --- Helper to Sanitize Data for Firestore ---
@@ -409,7 +410,8 @@ export const createRoom = async (title: string, thumbnail: string, host: User, h
         admins: [],
         gameLuck: 50, // Default fair luck
         gameMode: 'FAIR', // Default mode
-        hookThreshold: 50000 // Default hook threshold
+        hookThreshold: 50000, // Default hook threshold
+        roomWealth: 0 // Initialize room wealth
     };
     await setDoc(roomRef, newRoom);
     return newRoom;
@@ -476,6 +478,52 @@ export const getRoomsByHostId = async (hostUid: string): Promise<Room[]> => {
 
 export const updateRoomDetails = async (roomId: string, updates: Partial<Room>) => {
     await updateDoc(doc(db, 'rooms', roomId), updates);
+};
+
+export const distributeRoomWealth = async (roomId: string, hostUid: string, targetDisplayId: string, amount: number) => {
+    if (amount <= 0) throw new Error("Invalid amount");
+
+    // 1. Verify target user
+    const targetUser = await searchUserByDisplayId(targetDisplayId);
+    if (!targetUser || !targetUser.uid) throw new Error("Target user not found");
+
+    const roomRef = doc(db, 'rooms', roomId);
+    const targetUserRef = doc(db, 'users', targetUser.uid);
+    const transactionRef = doc(collection(db, 'rooms', roomId, 'wealth_transactions'));
+
+    await runTransaction(db, async (transaction) => {
+        const roomDoc = await transaction.get(roomRef);
+        if (!roomDoc.exists()) throw new Error("Room does not exist");
+        
+        const roomData = roomDoc.data() as Room;
+        
+        // 2. Verify Host
+        
+        const currentWealth = roomData.roomWealth || 0;
+        if (currentWealth < amount) throw new Error("Insufficient room wealth");
+
+        // 3. Deduct from Room
+        transaction.update(roomRef, { roomWealth: increment(-amount) });
+
+        // 4. Add to Target User
+        transaction.update(targetUserRef, { 'wallet.diamonds': increment(amount) });
+
+        // 5. Record Transaction
+        transaction.set(transactionRef, {
+            id: transactionRef.id,
+            targetUserName: targetUser.name,
+            targetUserAvatar: targetUser.avatar,
+            targetDisplayId: targetUser.id,
+            amount: amount,
+            timestamp: Date.now()
+        });
+    });
+};
+
+export const getRoomWealthHistory = async (roomId: string): Promise<WealthTransaction[]> => {
+    const q = query(collection(db, 'rooms', roomId, 'wealth_transactions'), orderBy('timestamp', 'desc'), limit(50));
+    const snap = await getDocs(q);
+    return snap.docs.map(d => d.data() as WealthTransaction);
 };
 
 // --- REAL-TIME VIEWER TRACKING ---
@@ -1035,9 +1083,13 @@ export const sendGiftTransaction = async (roomId: string, senderUid: string, tar
         contributors[senderKey].name = senderData.name;
         contributors[senderKey].avatar = senderData.avatar;
 
+        // NEW: Add 15% to Room Wealth
+        const wealthContribution = Math.floor(cost * 0.15);
+
         transaction.update(roomRef, {
             contributors: contributors,
-            cupStartTime: cupStart
+            cupStartTime: cupStart,
+            roomWealth: increment(wealthContribution) // Increment accumulated room wealth
         });
 
         const senderRef = doc(db, 'users', senderUid);

@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef, memo } from 'react';
-import { ArrowLeft, Send, Heart, Share2, Gift as GiftIcon, Users, Crown, Mic, MicOff, Lock, Unlock, Settings, Image as ImageIcon, X, Info, Minimize2, LogOut, BadgeCheck, Loader2, Upload, Shield, Trophy, Bot, Volume2, VolumeX, ArrowDownCircle, Ban, Trash2, UserCog, UserMinus, Zap, BarChart3, Gamepad2, Clock, LayoutGrid, ListMusic, Plus, Check, Search, Circle, CheckCircle2, KeyRound, MoreVertical, Grid, Sprout, Car, RotateCw, Coins, History, Hand, Hexagon, Play, Pause, SkipForward, SkipBack, Music, Flag, HeartHandshake, Film } from 'lucide-react';
-import { Room, ChatMessage, Gift, Language, User, RoomSeat } from '../types';
+import { ArrowLeft, Send, Heart, Share2, Gift as GiftIcon, Users, Crown, Mic, MicOff, Lock, Unlock, Settings, Image as ImageIcon, X, Info, Minimize2, LogOut, BadgeCheck, Loader2, Upload, Shield, Trophy, Bot, Volume2, VolumeX, ArrowDownCircle, Ban, Trash2, UserCog, UserMinus, Zap, BarChart3, Gamepad2, Clock, LayoutGrid, ListMusic, Plus, Check, Search, Circle, CheckCircle2, KeyRound, MoreVertical, Grid, Sprout, Car, RotateCw, Coins, History, Hand, Hexagon, Play, Pause, SkipForward, SkipBack, Music, Flag, HeartHandshake, Film, RefreshCw, FileText } from 'lucide-react';
+import { Room, ChatMessage, Gift, Language, User, RoomSeat, WealthTransaction } from '../types';
 import { GIFTS, STORE_ITEMS, ROOM_BACKGROUNDS, VIP_TIERS, ADMIN_ROLES } from '../constants';
-import { listenToMessages, sendMessage, takeSeat, leaveSeat, updateRoomDetails, sendGiftTransaction, toggleSeatLock, toggleSeatMute, decrementViewerCount, listenToRoom, kickUserFromSeat, banUserFromRoom, unbanUserFromRoom, removeRoomAdmin, addRoomAdmin, searchUserByDisplayId, enterRoom, exitRoom, listenToRoomViewers, getUserProfile, changeRoomSeatCount, updateWalletForGame } from '../services/firebaseService';
+import { listenToMessages, sendMessage, takeSeat, leaveSeat, updateRoomDetails, sendGiftTransaction, toggleSeatLock, toggleSeatMute, decrementViewerCount, listenToRoom, kickUserFromSeat, banUserFromRoom, unbanUserFromRoom, removeRoomAdmin, addRoomAdmin, searchUserByDisplayId, enterRoom, exitRoom, listenToRoomViewers, getUserProfile, changeRoomSeatCount, updateWalletForGame, distributeRoomWealth, getRoomWealthHistory } from '../services/firebaseService';
 import { joinVoiceChannel, leaveVoiceChannel, toggleMicMute, publishMicrophone, unpublishMicrophone, toggleAllRemoteAudio, listenToVolume, playMusicFile, stopMusic, setMusicVolume, seekMusic, pauseMusic, resumeMusic, getMusicTrack, preloadMicrophone } from '../services/agoraService';
 import { generateAiHostResponse } from '../services/geminiService';
 import { compressImage } from '../services/imageService';
@@ -189,6 +189,16 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
   const [speakingUsers, setSpeakingUsers] = useState<Set<string>>(new Set());
   const lastSpeakingUpdate = useRef<number>(0);
 
+  // Wealth Distribution States
+  const [distributeTargetId, setDistributeTargetId] = useState('');
+  const [distributeAmount, setDistributeAmount] = useState('');
+  const [distributing, setDistributing] = useState(false);
+  
+  // Wealth History State
+  const [showWealthHistory, setShowWealthHistory] = useState(false);
+  const [wealthHistory, setWealthHistory] = useState<WealthTransaction[]>([]);
+  const [loadingHistory, setLoadingHistory] = useState(false);
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   
   const joinTimestamp = useRef(Date.now());
@@ -301,7 +311,17 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
       dailyProfit: { ar: 'الربح اليومي', en: 'Daily Profit' },
       cp: { ar: 'CP', en: 'CP' },
       standard: { ar: 'عادية', en: 'Standard' },
-      uploadVideo: { ar: 'رفع فيديو', en: 'Upload Video' }
+      uploadVideo: { ar: 'رفع فيديو', en: 'Upload Video' },
+      roomWealth: { ar: 'ثروة الغرفة', en: 'Room Wealth' },
+      enterUserId: { ar: 'أدخل أيدي المستخدم', en: 'Enter User ID' },
+      enterDistAmount: { ar: 'أدخل رقم التوزيع', en: 'Enter Amount' },
+      distribute: { ar: 'تأكيد', en: 'Confirm' },
+      distHistory: { ar: 'سجل التوزيع', en: 'Distribution History' },
+      wealthRecharge: { ar: 'شحن', en: 'Recharge' },
+      invalidAmount: { ar: 'الرجاء إدخال عدد صحيح', en: 'Please enter a valid number' },
+      invalidId: { ar: 'الرجاء إدخال أيدي المستخدم', en: 'Please enter User ID' },
+      distSuccess: { ar: 'تم التوزيع بنجاح', en: 'Distribution Successful' },
+      distFail: { ar: 'فشل التوزيع', en: 'Distribution Failed' }
     };
     return dict[key]?.[language] || key;
   };
@@ -604,8 +624,14 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
                   reader.onloadend = async () => {
                       if (typeof reader.result === 'string') {
                           content = reader.result;
-                          if (type === 'outer') await handleUpdateRoom({ thumbnail: content }); 
-                          else await handleUpdateRoom({ backgroundImage: content, backgroundType: 'video' });
+                          // OPTIMISTIC UPDATE: Update local state immediately to avoid "flash"
+                          if (type === 'outer') {
+                              setRoom(prev => ({ ...prev, thumbnail: content }));
+                              await handleUpdateRoom({ thumbnail: content }); 
+                          } else {
+                              setRoom(prev => ({ ...prev, backgroundImage: content, backgroundType: 'video' }));
+                              await handleUpdateRoom({ backgroundImage: content, backgroundType: 'video' });
+                          }
                           alert(language === 'ar' ? "تم التحديث" : "Updated successfully");
                       }
                   };
@@ -617,8 +643,13 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
                       alert(language === 'ar' ? "الصورة كبيرة" : "Image too large"); 
                       return; 
                   } 
-                  if (type === 'outer') await handleUpdateRoom({ thumbnail: compressed }); 
-                  else await handleUpdateRoom({ backgroundImage: compressed, backgroundType: 'image' }); 
+                  if (type === 'outer') {
+                      setRoom(prev => ({ ...prev, thumbnail: compressed }));
+                      await handleUpdateRoom({ thumbnail: compressed }); 
+                  } else {
+                      setRoom(prev => ({ ...prev, backgroundImage: compressed, backgroundType: 'image' }));
+                      await handleUpdateRoom({ backgroundImage: compressed, backgroundType: 'image' }); 
+                  }
                   alert(language === 'ar' ? "تم التحديث" : "Updated successfully");
               }
           } catch (error) { 
@@ -649,6 +680,50 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
       // If standard category, filter by static/animated and exclude CP
       return g.type === giftTab && g.category !== 'cp';
   });
+
+  // Handle Wealth Distribution
+  const handleDistributeWealth = async () => {
+      if (!distributeTargetId || !distributeAmount || !currentUser.uid) return;
+      const amount = parseInt(distributeAmount);
+      
+      if (isNaN(amount) || amount <= 0) {
+          alert(t('invalidAmount'));
+          return;
+      }
+      if (!distributeTargetId) {
+          alert(t('invalidId'));
+          return;
+      }
+
+      setDistributing(true);
+      try {
+          await distributeRoomWealth(room.id, currentUser.uid, distributeTargetId, amount);
+          alert(t('distSuccess'));
+          setDistributeTargetId('');
+          setDistributeAmount('');
+      } catch (e: any) {
+          alert(t('distFail') + ": " + e.message);
+      }
+      setDistributing(false);
+  };
+
+  const handleFetchHistory = async () => {
+      setLoadingHistory(true);
+      try {
+          const data = await getRoomWealthHistory(room.id);
+          setWealthHistory(data);
+      } catch(e) {
+          console.error(e);
+      }
+      setLoadingHistory(false);
+  };
+
+  const toggleHistoryView = () => {
+      if (!showWealthHistory) {
+          handleFetchHistory();
+      }
+      setShowWealthHistory(!showWealthHistory);
+  };
 
   return (
     <div className="relative h-[100dvh] w-full bg-black flex flex-col overflow-hidden">
@@ -975,52 +1050,133 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
       )}
 
       {showRoomInfoModal && (
-          <div className="absolute inset-0 z-[80] flex flex-col bg-gray-900/95 backdrop-blur-xl animate-in slide-in-from-bottom-10">
-              <div className="p-4 flex items-center justify-between">
-                  <button onClick={() => setShowRoomInfoModal(false)} className="p-2 rounded-full hover:bg-white/10 text-white">
-                      <X className="w-6 h-6" />
+          <div className="absolute inset-0 z-[80] flex flex-col items-center justify-center bg-black/80 backdrop-blur-sm p-6 animate-in fade-in">
+              <div className="w-full max-w-sm bg-gray-900/90 backdrop-blur-xl border border-white/10 rounded-3xl shadow-2xl p-6 relative overflow-hidden flex flex-col gap-4">
+                  {/* Close Button */}
+                  <button 
+                      onClick={() => setShowRoomInfoModal(false)} 
+                      className="absolute top-4 right-4 p-2 bg-white/10 rounded-full hover:bg-white/20 transition text-white z-20"
+                  >
+                      <X className="w-5 h-5" />
                   </button>
+
+                  {/* Room Cover & Basic Info */}
+                  <div className="flex flex-col items-center">
+                      <div className="w-24 h-24 rounded-2xl overflow-hidden shadow-lg border-2 border-white/20 mb-3">
+                          <img src={room.thumbnail} className="w-full h-full object-cover" alt={room.title} />
+                      </div>
+                      <h2 className="text-xl font-bold text-white mb-1">{room.title}</h2>
+                      <div className="bg-white/10 px-3 py-1 rounded-full text-xs text-gray-300 font-mono mb-2">
+                          ID: {room.displayId || room.id}
+                      </div>
+                  </div>
+
+                  {/* Room Wealth Card */}
+                  <div className="w-full bg-gradient-to-r from-purple-900/80 to-indigo-900/80 rounded-2xl p-4 border border-purple-500/30 shadow-lg relative overflow-hidden">
+                      <div className="absolute top-0 right-0 p-3 opacity-20"><Coins className="w-16 h-16 text-yellow-400" /></div>
+                      
+                      {/* History Toggle Button - TOP LEFT (RTL safe via absolute left-2) */}
+                      {isHost && (
+                          <button 
+                              onClick={toggleHistoryView}
+                              className="absolute top-2 left-2 z-20 p-2 bg-black/30 rounded-full hover:bg-black/50 transition border border-white/10"
+                          >
+                              {showWealthHistory ? <ArrowLeft className="w-4 h-4 text-white rtl:rotate-180" /> : <FileText className="w-4 h-4 text-white" />}
+                          </button>
+                      )}
+
+                      <div className="flex justify-between items-start relative z-10">
+                          <div>
+                              <h3 className="text-purple-200 text-xs font-bold uppercase tracking-wider mb-1 flex items-center gap-1">
+                                  <RotateCw className="w-3 h-3 animate-spin-slow"/> {t('roomWealth')}
+                              </h3>
+                              <p className="text-2xl font-black text-yellow-400 drop-shadow-sm flex items-center gap-2">
+                                  💎 {(room.roomWealth || 0).toLocaleString()}
+                              </p>
+                          </div>
+                      </div>
+
+                      {/* Content Area: Either History List or Distribution Form */}
+                      {isHost && (
+                          <div className="mt-4 pt-3 border-t border-purple-500/20">
+                              {showWealthHistory ? (
+                                  <div className="h-[180px] overflow-y-auto pr-1 space-y-2 custom-scrollbar">
+                                      <h4 className="text-[10px] text-purple-200 font-bold mb-2 flex items-center gap-1">
+                                          <History className="w-3 h-3"/> {t('distHistory')}
+                                      </h4>
+                                      {loadingHistory ? (
+                                          <div className="text-center text-white/50 text-xs py-4"><Loader2 className="w-4 h-4 animate-spin mx-auto"/></div>
+                                      ) : wealthHistory.length === 0 ? (
+                                          <div className="text-center text-white/50 text-xs py-4">No history found</div>
+                                      ) : wealthHistory.map((tx) => (
+                                          <div key={tx.id} className="flex items-center gap-2 bg-black/30 p-2 rounded-lg border border-white/5">
+                                              <img src={tx.targetUserAvatar} className="w-8 h-8 rounded-full object-cover border border-purple-500/30" />
+                                              <div className="flex-1 min-w-0">
+                                                  <div className="text-xs font-bold text-white truncate">{tx.targetUserName}</div>
+                                                  <div className="text-[9px] text-gray-400 font-mono">ID: {tx.targetDisplayId}</div>
+                                              </div>
+                                              <div className="text-right">
+                                                  <div className="text-xs font-bold text-yellow-400">+{tx.amount.toLocaleString()}</div>
+                                                  <div className="text-[8px] text-gray-500">{new Date(tx.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</div>
+                                              </div>
+                                          </div>
+                                      ))}
+                                  </div>
+                              ) : (
+                                  <div className="space-y-3 animate-in fade-in">
+                                      <div className="space-y-2">
+                                          <label className="text-[10px] text-purple-200 font-bold block">{t('enterUserId')}</label>
+                                          <input 
+                                              type="text" 
+                                              value={distributeTargetId}
+                                              onChange={(e) => setDistributeTargetId(e.target.value)}
+                                              className="w-full bg-black/40 border border-purple-500/30 rounded-xl px-3 py-2 text-white text-xs outline-none focus:border-yellow-400 transition"
+                                              placeholder="ID..."
+                                          />
+                                      </div>
+                                      <div className="space-y-2">
+                                          <label className="text-[10px] text-purple-200 font-bold block">{t('enterDistAmount')}</label>
+                                          <input 
+                                              type="number" 
+                                              value={distributeAmount}
+                                              onChange={(e) => setDistributeAmount(e.target.value)}
+                                              className="w-full bg-black/40 border border-purple-500/30 rounded-xl px-3 py-2 text-white text-xs outline-none focus:border-yellow-400 transition"
+                                              placeholder="0"
+                                          />
+                                      </div>
+                                      <button 
+                                          onClick={handleDistributeWealth}
+                                          disabled={distributing}
+                                          className="w-full bg-gradient-to-r from-yellow-500 to-orange-500 text-black font-bold py-2 rounded-xl text-xs shadow-lg hover:brightness-110 active:scale-95 transition flex items-center justify-center gap-2 disabled:opacity-50"
+                                      >
+                                          {distributing ? <Loader2 className="w-3 h-3 animate-spin"/> : <Zap className="w-3 h-3 fill-black"/>} {t('wealthRecharge')}
+                                      </button>
+                                  </div>
+                              )}
+                          </div>
+                      )}
+                  </div>
+
+                  {/* Host Info Small */}
+                  <div className="flex items-center justify-center gap-3 bg-white/5 p-2 rounded-xl border border-white/5">
+                       <img src={room.hostAvatar} className="w-8 h-8 rounded-full object-cover border border-gray-500"/>
+                       <div className="text-left">
+                           <p className="text-[10px] text-gray-400">Host</p>
+                           <p className="text-xs font-bold text-white max-w-[100px] truncate">{room.hostName}</p>
+                       </div>
+                  </div>
+
                   {canManageRoom && (
                       <button 
                           onClick={() => {
                               setShowRoomInfoModal(false);
                               setShowRoomSettings(true);
                           }}
-                          className="p-2 bg-white/10 rounded-full text-white hover:bg-white/20 transition"
+                          className="w-full py-3 bg-white/10 rounded-xl text-white font-bold text-sm hover:bg-white/20 transition flex items-center justify-center gap-2"
                       >
-                          <Settings className="w-5 h-5" />
+                          <Settings className="w-4 h-4" /> {t('roomSettings')}
                       </button>
                   )}
-              </div>
-              <div className="flex-1 overflow-y-auto p-6 flex flex-col items-center">
-                  <div className="w-32 h-32 rounded-3xl overflow-hidden shadow-2xl border-4 border-white/10 mb-6">
-                      <img src={room.thumbnail} className="w-full h-full object-cover" alt={room.title} />
-                  </div>
-                  <h1 className="text-2xl font-bold text-white text-center mb-2">{room.title}</h1>
-                  <div className="bg-white/5 px-4 py-1.5 rounded-full text-sm text-gray-300 font-mono mb-8 border border-white/5">
-                      ID: {room.displayId || room.id}
-                  </div>
-                  <div className="w-full bg-white/5 rounded-2xl p-6 border border-white/10">
-                      <h3 className="text-gray-400 text-xs font-bold uppercase tracking-wider mb-4 border-b border-white/5 pb-2">
-                          {t('roomDesc')}
-                      </h3>
-                      <p className="text-white text-sm leading-relaxed whitespace-pre-wrap text-center">
-                          {room.description || t('pinned')}
-                      </p>
-                  </div>
-                  <div className="mt-8 flex gap-4">
-                       <div className="flex flex-col items-center p-4 bg-white/5 rounded-2xl min-w-[80px]">
-                           <Users className="w-6 h-6 text-brand-400 mb-2"/>
-                           <span className="text-lg font-bold text-white">{viewers.length}</span>
-                           <span className="text-[10px] text-gray-400">Online</span>
-                       </div>
-                       
-                       <div className="flex flex-col items-center p-4 bg-white/5 rounded-2xl min-w-[80px]">
-                           <img src={room.hostAvatar} className="w-6 h-6 rounded-full mb-2 object-cover"/>
-                           <span className="text-xs font-bold text-white max-w-[80px] truncate">{room.hostName}</span>
-                           <span className="text-[10px] text-gray-400">Host</span>
-                       </div>
-                  </div>
               </div>
           </div>
       )}
@@ -1431,8 +1587,8 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
               <div className="w-full max-w-sm bg-gray-900 border border-gray-700 rounded-t-3xl sm:rounded-3xl p-6 shadow-2xl">
                    <h3 className="text-white font-bold text-lg mb-6 text-center">{t('exitTitle')}</h3>
                    <div className="space-y-3">
-                       <button onClick={() => onAction('minimize')} className="w-full py-4 rounded-xl bg-gray-800 text-white font-bold flex items-center justify-center gap-3 hover:bg-gray-700 transition"><Minimize2 className="w-5 h-5 text-blue-400" />{t('minimize')}</button>
-                       <button onClick={handleLeaveRoomAction} className="w-full py-4 rounded-xl bg-red-900/20 text-red-500 border border-red-900/50 font-bold flex items-center justify-center gap-3 hover:bg-red-900/30 transition"><LogOut className="w-5 h-5" />{t('leave')}</button>
+                       <button onClick={() => { setShowExitModal(false); onAction('minimize'); }} className="w-full py-4 rounded-xl bg-gray-800 text-white font-bold flex items-center justify-center gap-3 hover:bg-gray-700 transition"><Minimize2 className="w-5 h-5 text-blue-400" />{t('minimize')}</button>
+                       <button onClick={() => { setShowExitModal(false); handleLeaveRoomAction(); }} className="w-full py-4 rounded-xl bg-red-900/20 text-red-500 border border-red-900/50 font-bold flex items-center justify-center gap-3 hover:bg-red-900/30 transition"><LogOut className="w-5 h-5" />{t('leave')}</button>
                        <button onClick={() => setShowExitModal(false)} className="w-full py-3 text-gray-500 font-medium text-sm mt-2">{t('cancel')}</button>
                    </div>
               </div>

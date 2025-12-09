@@ -176,6 +176,16 @@ export interface Room {
   gameLuck?: number; // 0-100 percentage (General luck)
   gameMode?: 'FAIR' | 'DRAIN' | 'HOOK'; // New: Algorithm Mode
   hookThreshold?: number; // New: Amount user can win before DRAIN activates in HOOK mode
+  roomWealth?: number; // NEW: Tracks accumulated wealth from gifts (15%)
+}
+
+export interface WealthTransaction {
+  id: string;
+  targetUserName: string;
+  targetUserAvatar: string;
+  targetDisplayId: string;
+  amount: number;
+  timestamp: number;
 }
 
 export interface Banner {

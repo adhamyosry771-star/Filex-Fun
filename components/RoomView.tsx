@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef, memo } from 'react';
 import { ArrowLeft, Send, Heart, Share2, Gift as GiftIcon, Users, Crown, Mic, MicOff, Lock, Unlock, Settings, Image as ImageIcon, X, Info, Minimize2, LogOut, BadgeCheck, Loader2, Upload, Shield, Trophy, Bot, Volume2, VolumeX, ArrowDownCircle, Ban, Trash2, UserCog, UserMinus, Zap, BarChart3, Gamepad2, Clock, LayoutGrid, ListMusic, Plus, Check, Search, Circle, CheckCircle2, KeyRound, MoreVertical, Grid, Sprout, Car, RotateCw, Coins, History, Hand, Hexagon, Play, Pause, SkipForward, SkipBack, Music, Flag, HeartHandshake, Film, RefreshCw, FileText } from 'lucide-react';
 import { Room, ChatMessage, Gift, Language, User, RoomSeat, WealthTransaction } from '../types';
@@ -200,6 +201,7 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
   const [loadingHistory, setLoadingHistory] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const chatInputRef = useRef<HTMLInputElement>(null);
   
   const joinTimestamp = useRef(Date.now());
   const hasSentJoinMsg = useRef(false);
@@ -416,7 +418,10 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
   useEffect(() => {
       const uid = currentUser.uid;
       const agoraUid = currentUser.uid || currentUser.id;
-      if (agoraUid) { preloadMicrophone(); joinVoiceChannel(room.id, agoraUid); }
+      if (agoraUid) { 
+          // REMOVED: preloadMicrophone() here to fix permission error on load
+          joinVoiceChannel(room.id, agoraUid); 
+      }
       if (uid) enterRoom(room.id, currentUser);
       return () => { if (uid) exitRoom(room.id, uid); leaveVoiceChannel(); stopMusic(); };
   }, [room.id]);
@@ -554,6 +559,17 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
     if (!inputValue.trim()) return;
     const userMsg: ChatMessage = { id: Date.now().toString(), userId: currentUser.id, userName: currentUser.name, userAvatar: currentUser.avatar || 'https://picsum.photos/200', text: inputValue, timestamp: Date.now(), frameId: currentUser.equippedFrame || null, bubbleId: currentUser.equippedBubble || null, vipLevel: currentUser.vipLevel || 0, adminRole: currentUser.adminRole || null };
     setMessages(prev => [userMsg, ...prev]); setInputValue(''); try { await sendMessage(room.id, userMsg); } catch (e) { }
+  };
+  const handleMentionUser = (userName: string) => {
+      setSelectedUser(null);
+      // Append mention instead of replacing/prepending blindly
+      setInputValue((prev) => {
+          const prefix = prev.trim().length > 0 ? prev.trim() + ' ' : '';
+          return prefix + `@${userName} `;
+      });
+      setTimeout(() => {
+          chatInputRef.current?.focus();
+      }, 100);
   };
   const toggleGiftTarget = (uid: string) => {
       if (uid === 'all') { setGiftTargets(['all']); return; }
@@ -901,7 +917,17 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
 
                                    <span className={`text-[10px] font-bold flex items-center gap-1 ${getVipTextStyle(msg.vipLevel || 0)}`}>{msg.userName}{isOfficial && <BadgeCheck className="w-3 h-3 text-blue-500 fill-blue-100 inline" />}{isAi && <span className="text-[8px] bg-brand-600 text-white px-1 rounded">BOT</span>}</span>
                               </div>
-                              <div className={`px-3 py-1.5 text-xs leading-relaxed text-white shadow-sm break-words border border-white/5 backdrop-blur-md ${bubbleClass} rounded-tr-none ${isYellowMsg ? 'text-yellow-300 font-bold border-yellow-500/50 bg-yellow-900/20' : ''}`}>{msg.text}</div>
+                              <div className={`px-3 py-1.5 text-xs leading-relaxed text-white shadow-sm break-words border border-white/5 backdrop-blur-md ${bubbleClass} rounded-tr-none ${isYellowMsg ? 'text-yellow-300 font-bold border-yellow-500/50 bg-yellow-900/20' : ''}`}>
+                                  {msg.text.split(' ').map((word, i) => {
+                                      // Only color words that start with @ AND have content after @
+                                      const isMention = word.startsWith('@') && word.length > 1;
+                                      return (
+                                          <span key={i} className={`${isMention ? 'text-yellow-400 font-bold' : 'text-white'} mr-1`}>
+                                              {word}
+                                          </span>
+                                      );
+                                  })}
+                              </div>
                           </div>
                       </div>
                   );
@@ -927,7 +953,7 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
               <button onClick={handleToggleSpeaker} className={`p-2 rounded-full shadow-lg transition ${isSpeakerMuted ? 'bg-gray-700 text-gray-400' : 'bg-white/10 text-brand-400 hover:bg-white/20'}`}>{isSpeakerMuted ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}</button>
               <button onClick={() => setShowGiftPanel(true)} disabled={isSendingGift} className="p-2 rounded-full bg-gradient-to-r from-pink-500 to-rose-500 text-white shadow-lg shadow-pink-500/20 hover:scale-105 transition disabled:opacity-50"><GiftIcon className="w-5 h-5" /></button>
               <div className="flex-1 relative">
-                  <input type="text" value={inputValue} onChange={(e) => setInputValue(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()} placeholder={t('placeholder')} className={`w-full bg-white/10 border border-white/10 rounded-full py-2.5 px-4 text-sm text-white focus:border-brand-500 outline-none placeholder-gray-400 ${language === 'ar' ? 'text-right' : 'text-left'}`}/>
+                  <input ref={chatInputRef} type="text" value={inputValue} onChange={(e) => setInputValue(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()} placeholder={t('placeholder')} className={`w-full bg-white/10 border border-white/10 rounded-full py-2.5 px-4 text-sm text-white focus:border-brand-500 outline-none placeholder-gray-400 ${language === 'ar' ? 'text-right' : 'text-left'}`}/>
                   <button onClick={handleSendMessage} disabled={!inputValue.trim()} className="absolute right-2 top-1.5 p-1.5 bg-brand-600 rounded-full text-white disabled:opacity-0 transition hover:bg-brand-500 rtl:right-auto rtl:left-2"><Send className="w-3.5 h-3.5 rtl:rotate-180" /></button>
               </div>
               <button onClick={() => setShowOptionsMenu(true)} className="p-2 rounded-full bg-white/10 text-white hover:bg-white/20"><LayoutGrid className="w-5 h-5" /></button>
@@ -1395,6 +1421,7 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
                       setSelectedUser(null);
                       setShowGiftPanel(true);
                   }}
+                  onMention={selectedUser.userName ? () => handleMentionUser(selectedUser.userName!) : undefined}
                   onKickSeat={canBanTarget && selectedUser.userId ? () => handleKickSeat(selectedUser.index) : undefined}
                   onBanUser={canBanTarget && selectedUser.userId ? () => handleBanRequest(selectedUser.userId!) : undefined}
                   onMakeAdmin={isHost && !isTargetAdmin && !isTargetMe ? () => handleMakeAdmin(targetUid, selectedUser.userName!) : undefined}

@@ -26,30 +26,34 @@ const log = (msg: string, err?: any) => {
 export const initializeAgora = async () => {
     if (client) return;
 
-    client = AgoraRTC.createClient({ mode: "rtc", codec: "vp8" });
-    
-    // Enable Volume Indicator (Interval: 200ms, Smoothness: 3)
-    client.enableAudioVolumeIndicator();
-    
-    client.on("volume-indicator", (volumes) => {
-        if (volumeCallback) volumeCallback(volumes);
-    });
-    
-    client.on("user-published", async (user, mediaType) => {
-        try {
-            if (!client) return;
-            await client.subscribe(user, mediaType);
-            if (mediaType === "audio") {
-                const audioTrack = user.audioTrack;
-                if (audioTrack) {
-                    audioTrack.play();
-                    audioTrack.setVolume(isRoomAudioMuted ? 0 : 100);
+    try {
+        client = AgoraRTC.createClient({ mode: "rtc", codec: "vp8" });
+        
+        // Enable Volume Indicator (Interval: 200ms, Smoothness: 3)
+        client.enableAudioVolumeIndicator();
+        
+        client.on("volume-indicator", (volumes) => {
+            if (volumeCallback) volumeCallback(volumes);
+        });
+        
+        client.on("user-published", async (user, mediaType) => {
+            try {
+                if (!client) return;
+                await client.subscribe(user, mediaType);
+                if (mediaType === "audio") {
+                    const audioTrack = user.audioTrack;
+                    if (audioTrack) {
+                        audioTrack.play();
+                        audioTrack.setVolume(isRoomAudioMuted ? 0 : 100);
+                    }
                 }
+            } catch (e) {
+                log("Auto-Subscribe failed", e);
             }
-        } catch (e) {
-            log("Auto-Subscribe failed", e);
-        }
-    });
+        });
+    } catch (e) {
+        console.error("Failed to initialize Agora Client", e);
+    }
 };
 
 export const listenToVolume = (cb: (volumes: { uid: string | number, level: number }[]) => void) => {
@@ -74,7 +78,8 @@ export const preloadMicrophone = async () => {
         await localAudioTrack.setEnabled(false);
         log('Mic Preloaded & Ready 🚀');
     } catch (e) {
-        console.warn("Mic Preload failed (Permission might be required on click)", e);
+        // console.warn("Mic Preload failed (Permission might be required on click)", e);
+        // Suppress error log here as it's expected if user hasn't interacted yet
     }
 };
 
@@ -85,8 +90,8 @@ export const joinVoiceChannel = (channelName: string, uid: string | number) => {
             if (!client) await initializeAgora();
             if (!client) return;
 
-            // Trigger preload immediately when joining a room
-            preloadMicrophone();
+            // REMOVED: preloadMicrophone() call here to avoid "Permission denied" on load.
+            // We will only load mic when user takes a seat.
 
             if (client.connectionState === 'CONNECTED' && currentChannel === channelName) {
                 return;
@@ -99,9 +104,6 @@ export const joinVoiceChannel = (channelName: string, uid: string | number) => {
             await client.join(APP_ID, channelName, null, uid);
             currentChannel = channelName;
             
-            // If we have a local track and we were supposed to be publishing, republish
-            // (Handled by RoomView logic usually)
-
         } catch (error: any) {
             log('Join Error', error);
         }
@@ -117,8 +119,9 @@ export const switchMicrophoneState = async (shouldPublish: boolean, muted: boole
         if (shouldPublish) {
             // --- START TALKING ---
             
-            // 1. Get Track (Should be preloaded already)
+            // 1. Get Track (Create if not exists)
             if (!localAudioTrack) {
+                // This is where permission dialog appears
                 await preloadMicrophone();
             }
 

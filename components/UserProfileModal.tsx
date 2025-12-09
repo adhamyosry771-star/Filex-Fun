@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, User as UserIcon, MessageSquare, Gift, BadgeCheck, Loader2, Shield, MicOff, Ban, UserCog, UserMinus, Maximize2, ArrowDownToLine, Globe, Calendar, Mars, Venus, UserPlus, Check, Clock } from 'lucide-react';
+import { X, User as UserIcon, MessageSquare, Gift, BadgeCheck, Loader2, Shield, MicOff, Ban, UserCog, UserMinus, Maximize2, ArrowDownToLine, Globe, Calendar, Mars, Venus, UserPlus, Check, Clock, AtSign } from 'lucide-react';
 import { User, Language, RoomSeat } from '../types';
 import { searchUserByDisplayId, getUserProfile, checkFriendshipStatus, sendFriendRequest } from '../services/firebaseService';
 import { LEVEL_ICONS, CHARM_ICONS, ADMIN_ROLES } from '../constants';
@@ -10,6 +10,7 @@ interface UserProfileModalProps {
   onClose: () => void;
   onMessage: () => void;
   onGift: () => void;
+  onMention?: () => void; // New prop for mention
   onKickSeat?: () => void;
   onBanUser?: () => void;
   onMakeAdmin?: () => void;
@@ -19,7 +20,7 @@ interface UserProfileModalProps {
   language: Language;
 }
 
-const UserProfileModal: React.FC<UserProfileModalProps> = ({ user, currentUser, onClose, onMessage, onGift, onKickSeat, onBanUser, onMakeAdmin, onRemoveAdmin, onLeaveSeat, onOpenFullProfile, language }) => {
+const UserProfileModal: React.FC<UserProfileModalProps> = ({ user, currentUser, onClose, onMessage, onGift, onMention, onKickSeat, onBanUser, onMakeAdmin, onRemoveAdmin, onLeaveSeat, onOpenFullProfile, language }) => {
   const [fullProfile, setFullProfile] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [friendshipStatus, setFriendshipStatus] = useState<'friends' | 'sent' | 'none' | 'loading'>('loading');
@@ -101,7 +102,8 @@ const UserProfileModal: React.FC<UserProfileModalProps> = ({ user, currentUser, 
       banRoom: { ar: 'حظر من الروم', en: 'Ban Room' },
       makeAdmin: { ar: 'تعيين مشرف', en: 'Make Admin' },
       removeAdmin: { ar: 'إزالة مشرف', en: 'Remove Admin' },
-      leaveSeat: { ar: 'نزول من المايك', en: 'Leave Seat' }
+      leaveSeat: { ar: 'نزول من المايك', en: 'Leave Seat' },
+      mention: { ar: 'منشن', en: 'Mention' }
     };
     return dict[key][language];
   };
@@ -241,7 +243,18 @@ const UserProfileModal: React.FC<UserProfileModalProps> = ({ user, currentUser, 
             {/* Actions */}
             {!isProfileMe && (
                 <div className="w-full mt-8 space-y-3">
-                    <div className="flex gap-3">
+                    <div className="flex items-center gap-2 w-full">
+                        {/* Mention Button (Icon Only) */}
+                        {onMention && (
+                            <button 
+                                onClick={onMention}
+                                className="p-3.5 bg-gray-700/80 rounded-2xl text-white hover:bg-gray-600 transition shadow-lg border border-gray-600 flex-shrink-0"
+                                title={t('mention')}
+                            >
+                                <AtSign className="w-5 h-5" />
+                            </button>
+                        )}
+
                         {/* Dynamic Action Button based on Friendship */}
                         {friendshipStatus === 'friends' ? (
                             <button 

@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { ArrowLeft, Send, MoreHorizontal } from 'lucide-react';
 import { Language, User, PrivateChatSummary, PrivateMessage } from '../types';
@@ -18,17 +17,19 @@ const PrivateChatView: React.FC<PrivateChatViewProps> = ({ language, onBack, cur
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-      // Mark as read when opening
-      if (currentUser.uid) {
-          markChatAsRead(currentUser.uid, chatSummary.otherUserUid);
-      }
-
       const unsub = listenToPrivateMessages(chatSummary.chatId, (msgs) => {
           setMessages(msgs);
           messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+          
+          // Mark as read whenever we receive updates (on load or new message)
+          // This ensures the badge is cleared immediately when entering
+          // AND stays cleared if a new message arrives while the view is open.
+          if (currentUser.uid) {
+              markChatAsRead(currentUser.uid, chatSummary.otherUserUid);
+          }
       });
       return () => unsub();
-  }, [chatSummary.chatId]);
+  }, [chatSummary.chatId, currentUser.uid, chatSummary.otherUserUid]);
 
   const handleSend = async () => {
       if (!inputText.trim() || !currentUser.uid) return;

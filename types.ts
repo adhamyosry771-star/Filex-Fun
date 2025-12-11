@@ -11,7 +11,9 @@ export enum ViewState {
   GAMES = 'GAMES',
   SEARCH = 'SEARCH',
   PRIVATE_CHAT = 'PRIVATE_CHAT',
-  AGENCY = 'AGENCY'
+  AGENCY = 'AGENCY',
+  WELCOME_AGENCY = 'WELCOME_AGENCY',
+  BAN_SYSTEM = 'BAN_SYSTEM'
 }
 
 export type Language = 'ar' | 'en';
@@ -55,6 +57,7 @@ export interface User {
   receivedGifts?: Record<string, number>; // GiftID -> Count
   vip: boolean;
   vipLevel?: number;
+  vipExpiresAt?: number; // 0 or undefined means permanent, otherwise timestamp
   country?: string;
   age?: number;
   gender?: 'male' | 'female';
@@ -70,14 +73,25 @@ export interface User {
   isAdmin?: boolean;
   adminRole?: 'super_admin' | 'admin' | 'official_manager' | 'me_manager' | null;
   canCreateRoom?: boolean; // New Permission Field
+  canBanUsers?: boolean; // New Permission: Can ban other users
   bio?: string;
   isBanned?: boolean;
   banExpiresAt?: number; // Timestamp for when ban ends
   isPermanentBan?: boolean; // Flag for permanent ban
   isAgent?: boolean;
+  isWelcomeAgent?: boolean; // New: Can submit welcome requests
   agencyBalance?: number;
   dailyProfit?: number; // Track daily winnings
   lastDailyReset?: number; // Timestamp for last profit reset
+}
+
+export interface WelcomeRequest {
+  id: string;
+  agentId: string;
+  agentName: string;
+  targetDisplayId: string;
+  status: 'pending' | 'approved' | 'rejected';
+  timestamp: number;
 }
 
 export interface Notification {

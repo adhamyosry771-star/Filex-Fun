@@ -1,10 +1,9 @@
-
 import React, { useState, useEffect } from 'react';
-import { ShieldCheck, ArrowLeft, Megaphone, Inbox, Clock, ChevronRight, UserPlus, Check, X, MessageCircle } from 'lucide-react';
+import { ShieldCheck, ArrowLeft, Megaphone, Inbox, Clock, ChevronRight, UserPlus, Check, X, MessageCircle, Loader2 } from 'lucide-react';
 import { Language, Notification, FriendRequest, PrivateChatSummary } from '../types';
-import { listenToNotifications, listenToFriendRequests, acceptFriendRequest, rejectFriendRequest, listenToChatList, markSystemNotificationsRead, listenToUnreadNotifications, getUserProfile, sendPrivateMessage } from '../services/firebaseService';
+import { listenToNotifications, listenToFriendRequests, acceptFriendRequest, rejectFriendRequest, listenToChatList, markSystemNotificationsRead, listenToUnreadNotifications, getUserProfile, sendPrivateMessage, markOfficialMessagesRead, sendSystemNotification } from '../services/firebaseService';
 import { auth } from '../firebaseConfig';
-import PrivateChatView from './PrivateChatView'; // Not used here directly, handled by App usually, but for internal logic check
+import PrivateChatView from './PrivateChatView'; 
 
 interface MessagesViewProps {
   language: Language;
@@ -18,9 +17,13 @@ const MessagesView: React.FC<MessagesViewProps> = ({ language, onOpenChat }) => 
   const [chats, setChats] = useState<PrivateChatSummary[]>([]);
   const [loading, setLoading] = useState(false);
   
-  // Unread Counts for Menu
+  // Unread Counts for Menu (Separated)
   const [unreadSystem, setUnreadSystem] = useState(0);
+  const [unreadOfficial, setUnreadOfficial] = useState(0);
   const [unreadRequests, setUnreadRequests] = useState(0);
+  
+  // Track action loading for specific requests
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
 
   const t = (key: string) => {
     const dict: Record<string, { ar: string, en: string }> = {
@@ -46,7 +49,6 @@ const MessagesView: React.FC<MessagesViewProps> = ({ language, onOpenChat }) => 
       if (!auth.currentUser) return;
       const uid = auth.currentUser.uid;
 
-      // Always listen to main counts when on main view
       let reqUnsub: (() => void) | null = null;
       let sysUnsub: (() => void) | null = null;
 
@@ -56,8 +58,12 @@ const MessagesView: React.FC<MessagesViewProps> = ({ language, onOpenChat }) => 
               setChats(list);
           });
           
-          // Listen to counts for badges
-          sysUnsub = listenToUnreadNotifications(uid, (count) => setUnreadSystem(count));
+          // Listen to counts for badges (Separated now)
+          sysUnsub = listenToUnreadNotifications(uid, (counts) => {
+              setUnreadSystem(counts.system);
+              setUnreadOfficial(counts.official);
+          });
+          
           reqUnsub = listenToFriendRequests(uid, (reqs) => {
               setRequests(reqs); // Needed for banner preview
               setUnreadRequests(reqs.length);
@@ -80,13 +86,17 @@ const MessagesView: React.FC<MessagesViewProps> = ({ language, onOpenChat }) => 
       else {
           // System & Official
           setLoading(true);
-          if (subView === 'system') {
-              // Mark as read when entering system messages
-              markSystemNotificationsRead(uid);
-          }
           const unsub = listenToNotifications(uid, subView as 'system' | 'official', (msgs) => {
               setNotifications(msgs);
               setLoading(false);
+              
+              // Continuously mark as read if active in this view
+              if (subView === 'system') {
+                  markSystemNotificationsRead(uid);
+              }
+              if (subView === 'official') {
+                  markOfficialMessagesRead(uid);
+              }
           });
           return () => unsub();
       }
@@ -94,40 +104,58 @@ const MessagesView: React.FC<MessagesViewProps> = ({ language, onOpenChat }) => 
 
   const handleRequestAction = async (targetReq: FriendRequest, action: 'accept' | 'reject') => {
       if (!auth.currentUser) return;
-      const myUid = auth.currentUser.uid;
+      
+      // Basic Debounce/Loading
+      if (actionLoading) return;
+      setActionLoading(targetReq.uid);
 
-      if (action === 'accept') {
-          // 1. Accept Friend Request in DB
-          await acceptFriendRequest(myUid, targetReq.uid);
+      try {
+          const myUid = auth.currentUser.uid;
 
-          // 2. Automatically Send a Message to start the chat
-          // Fetch my profile to get correct name/avatar
-          const myProfile = await getUserProfile(myUid);
-          
-          if (myProfile) {
-              const sender = {
-                  uid: myUid,
-                  name: myProfile.name,
-                  avatar: myProfile.avatar,
-                  frameId: myProfile.equippedFrame,
-                  bubbleId: myProfile.equippedBubble
-              };
-              const receiver = {
-                  uid: targetReq.uid,
-                  name: targetReq.name,
-                  avatar: targetReq.avatar
-              };
+          if (action === 'accept') {
+              // 1. Accept Friend Request in DB
+              await acceptFriendRequest(myUid, targetReq.uid);
 
-              const welcomeText = language === 'ar' 
-                  ? 'لقد قبلت طلب الصداقة الخاص بك، هيا ندردش! 👋' 
-                  : 'I accepted your friend request, let\'s chat! 👋';
+              // 2. Fetch my profile to get correct name/avatar for messages
+              const myProfile = await getUserProfile(myUid);
+              
+              if (myProfile) {
+                  // 3. Automatically Send a Message to start the chat
+                  const sender = {
+                      uid: myUid,
+                      name: myProfile.name,
+                      avatar: myProfile.avatar,
+                      frameId: myProfile.equippedFrame,
+                      bubbleId: myProfile.equippedBubble
+                  };
+                  const receiver = {
+                      uid: targetReq.uid,
+                      name: targetReq.name,
+                      avatar: targetReq.avatar
+                  };
 
-              // This creates the chat entries and sends the first message
-              await sendPrivateMessage(sender, receiver, welcomeText);
+                  const welcomeText = language === 'ar' 
+                      ? 'لقد قبلت طلب الصداقة الخاص بك، هيا ندردش! 👋' 
+                      : 'I accepted your friend request, let\'s chat! 👋';
+
+                  await sendPrivateMessage(sender, receiver, welcomeText);
+
+                  // 4. Notify the *other* user that request was accepted
+                  const notifTitle = language === 'ar' ? 'تم قبول الصداقة' : 'Friend Request Accepted';
+                  const notifBody = language === 'ar' 
+                      ? `لقد قبل ${myProfile.name} طلب الصداقة. هيا ندردش!`
+                      : `${myProfile.name} accepted your friend request. Let's chat!`;
+                  
+                  await sendSystemNotification(targetReq.uid, notifTitle, notifBody);
+              }
+
+          } else {
+              await rejectFriendRequest(myUid, targetReq.uid);
           }
-
-      } else {
-          await rejectFriendRequest(myUid, targetReq.uid);
+      } catch (e) {
+          console.error("Error handling request:", e);
+      } finally {
+          setActionLoading(null);
       }
   };
 
@@ -157,8 +185,20 @@ const MessagesView: React.FC<MessagesViewProps> = ({ language, onOpenChat }) => 
                             </div>
                         </div>
                         <div className="flex gap-2">
-                             <button onClick={() => handleRequestAction(req, 'reject')} className="p-2 bg-red-500/10 text-red-500 rounded-full"><X className="w-5 h-5"/></button>
-                             <button onClick={() => handleRequestAction(req, 'accept')} className="p-2 bg-green-500/10 text-green-500 rounded-full"><Check className="w-5 h-5"/></button>
+                             <button 
+                                onClick={(e) => { e.stopPropagation(); handleRequestAction(req, 'reject'); }}
+                                disabled={actionLoading === req.uid}
+                                className="p-2 bg-red-500/10 text-red-500 rounded-full hover:bg-red-500/20 transition disabled:opacity-50"
+                             >
+                                 <X className="w-5 h-5"/>
+                             </button>
+                             <button 
+                                onClick={(e) => { e.stopPropagation(); handleRequestAction(req, 'accept'); }}
+                                disabled={actionLoading === req.uid}
+                                className="p-2 bg-green-500/10 text-green-500 rounded-full hover:bg-green-500/20 transition disabled:opacity-50"
+                             >
+                                 {actionLoading === req.uid ? <Loader2 className="w-5 h-5 animate-spin" /> : <Check className="w-5 h-5"/>}
+                             </button>
                         </div>
                     </div>
                 ))}
@@ -221,8 +261,13 @@ const MessagesView: React.FC<MessagesViewProps> = ({ language, onOpenChat }) => 
         
         <div className="grid grid-cols-2 gap-4 mb-4">
           <div onClick={() => setSubView('official')} className="bg-gradient-to-br from-gray-900 to-gray-800 border border-gray-700 rounded-3xl p-5 cursor-pointer hover:scale-[1.02] transition shadow-lg relative overflow-hidden group">
-             <div className="w-12 h-12 rounded-2xl bg-blue-500/20 flex items-center justify-center text-blue-400 mb-4 border border-blue-500/30">
+             <div className="w-12 h-12 rounded-2xl bg-blue-500/20 flex items-center justify-center text-blue-400 mb-4 border border-blue-500/30 relative">
                 <Megaphone className="w-6 h-6" />
+                {unreadOfficial > 0 && (
+                    <div className="absolute -top-2 -right-2 bg-red-600 text-white text-[10px] font-bold w-5 h-5 flex items-center justify-center rounded-full border border-gray-800 animate-pulse">
+                        {unreadOfficial}
+                    </div>
+                )}
              </div>
              <h3 className="font-bold text-base text-white">{t('official')}</h3>
              <div className="flex items-center justify-between mt-2">
@@ -235,7 +280,7 @@ const MessagesView: React.FC<MessagesViewProps> = ({ language, onOpenChat }) => 
              <div className="w-12 h-12 rounded-2xl bg-orange-500/20 flex items-center justify-center text-orange-400 mb-4 border border-orange-500/30 relative">
                 <ShieldCheck className="w-6 h-6" />
                 {unreadSystem > 0 && (
-                    <div className="absolute -top-2 -right-2 bg-red-600 text-white text-[10px] font-bold w-5 h-5 flex items-center justify-center rounded-full border border-gray-800">
+                    <div className="absolute -top-2 -right-2 bg-red-600 text-white text-[10px] font-bold w-5 h-5 flex items-center justify-center rounded-full border border-gray-800 animate-pulse">
                         {unreadSystem}
                     </div>
                 )}

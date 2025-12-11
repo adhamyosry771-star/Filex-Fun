@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Home, Trophy, User as UserIcon, Users, PlusCircle, Copy, MessageSquare, Loader2, ChevronRight, Crown, ShoppingBag, Wallet as WalletIcon, Settings, Gem, Coins, Edit3, Zap, X, Trash2, Shield, Info, Smartphone, Star, Gamepad2, BadgeCheck, Database, PenBox, Globe, Calendar, Mars, Venus } from 'lucide-react';
+import { Home, Trophy, User as UserIcon, Users, PlusCircle, Copy, MessageSquare, Loader2, ChevronRight, Crown, ShoppingBag, Wallet as WalletIcon, Settings, Gem, Coins, Edit3, Zap, X, Trash2, Shield, Info, Smartphone, Star, Gamepad2, BadgeCheck, Database, PenBox, Globe, Calendar, Mars, Venus, Sparkles, Gavel } from 'lucide-react';
 import HomeView from './components/HomeView';
 import { RoomView } from './components/RoomView';
 import LoginView from './components/LoginView';
@@ -15,9 +15,11 @@ import AdminDashboard from './components/AdminDashboard';
 import SearchView from './components/SearchView';
 import PrivateChatView from './components/PrivateChatView';
 import AgencyView from './components/AgencyView';
+import WelcomeAgencyView from './components/WelcomeAgencyView'; 
+import BanSystemView from './components/BanSystemView'; // New Import
 import EditProfileModal from './components/EditProfileModal';
 import UserListModal from './components/UserListModal'; 
-import FullProfileView from './components/FullProfileView'; // Added Import
+import FullProfileView from './components/FullProfileView'; 
 import { ViewState, Room, User, Language, PrivateChatSummary } from './types';
 import { auth } from './firebaseConfig';
 import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
@@ -123,9 +125,9 @@ const App: React.FC = () => {
             setUnreadChatsCount(count);
         });
 
-        // 2. Listen System Notifications Unread
-        notifsUnsubscribe = listenToUnreadNotifications(user.uid, (count) => {
-            setUnreadNotifsCount(count);
+        // 2. Listen System Notifications Unread (UPDATED to use object)
+        notifsUnsubscribe = listenToUnreadNotifications(user.uid, (counts) => {
+            setUnreadNotifsCount(counts.total);
         });
 
         // 3. Listen Friend Requests
@@ -175,9 +177,17 @@ const App: React.FC = () => {
             avatar: data.avatar || authUser.photoURL || 'https://picsum.photos/seed/new/200/200',
             bio: 'Welcome to my profile!'
         });
-    } catch (e) {
-        setUserProfile(CURRENT_USER);
-        setIsOnboarding(false);
+    } catch (e: any) {
+        if (e.message && e.message.includes('الحد الأقصى')) {
+            alert(e.message);
+            await logoutUser();
+            setAuthUser(null);
+            setUserProfile(null);
+            setIsOnboarding(false);
+        } else {
+            setUserProfile(CURRENT_USER);
+            setIsOnboarding(false);
+        }
     } finally {
         setIsLoading(false);
     }
@@ -312,7 +322,9 @@ const App: React.FC = () => {
         supportMsg: { ar: 'من فضلك توجه إلى روم خدمة العملاء الرسميه', en: 'Please go to the official Customer Service room.' },
         ok: { ar: 'حسناً', en: 'OK' },
         admin: { ar: 'لوحة التحكم', en: 'Admin Panel' },
-        agency: { ar: 'لوحة الوكالة', en: 'Agency Dashboard' }
+        agency: { ar: 'لوحة الوكالة', en: 'Agency Dashboard' },
+        welcomeAgent: { ar: 'نظام الترحيب', en: 'Welcome System' },
+        banSystem: { ar: 'نظام الحظر', en: 'Ban System' }
     };
     return dict[key][language];
   };
@@ -374,6 +386,24 @@ const App: React.FC = () => {
       case ViewState.AGENCY:
         return userProfile ? (
             <AgencyView
+                user={userProfile}
+                language={language}
+                onBack={() => setCurrentView(ViewState.PROFILE)}
+            />
+        ) : <div />;
+
+      case ViewState.WELCOME_AGENCY:
+        return userProfile ? (
+            <WelcomeAgencyView
+                user={userProfile}
+                language={language}
+                onBack={() => setCurrentView(ViewState.PROFILE)}
+            />
+        ) : <div />;
+
+      case ViewState.BAN_SYSTEM:
+        return userProfile ? (
+            <BanSystemView
                 user={userProfile}
                 language={language}
                 onBack={() => setCurrentView(ViewState.PROFILE)}
@@ -475,7 +505,7 @@ const App: React.FC = () => {
                      </p>
                  )}
 
-                 <div className="flex items-center gap-2 mt-2">
+                 <div className="flex items-center gap-2 mt-1">
                     {adminRole && (
                        <div className={`text-[10px] font-bold px-3 py-0.5 rounded-full border ${ADMIN_ROLES[adminRole].class}`}>
                            {ADMIN_ROLES[adminRole].name[language]}
@@ -620,6 +650,18 @@ const App: React.FC = () => {
                             <ChevronRight className="w-4 h-4 text-blue-500 rtl:rotate-180" />
                         </div>
                     )}
+                    {userProfile.isWelcomeAgent && (
+                        <div onClick={() => setCurrentView(ViewState.WELCOME_AGENCY)} className="p-4 border-b border-white/5 flex justify-between items-center bg-purple-900/10 hover:bg-purple-900/20 transition cursor-pointer group">
+                            <div className="flex items-center gap-3"><Sparkles className="w-5 h-5 text-purple-500 transition group-hover:scale-110" /><span className="text-sm font-bold text-purple-400">{t('welcomeAgent')}</span></div>
+                            <ChevronRight className="w-4 h-4 text-purple-500 rtl:rotate-180" />
+                        </div>
+                    )}
+                    {userProfile.canBanUsers && (
+                        <div onClick={() => setCurrentView(ViewState.BAN_SYSTEM)} className="p-4 border-b border-white/5 flex justify-between items-center bg-red-900/10 hover:bg-red-900/20 transition cursor-pointer group">
+                            <div className="flex items-center gap-3"><Gavel className="w-5 h-5 text-red-500 transition group-hover:scale-110" /><span className="text-sm font-bold text-red-400">{t('banSystem')}</span></div>
+                            <ChevronRight className="w-4 h-4 text-red-500 rtl:rotate-180" />
+                        </div>
+                    )}
                     <div className="p-4 border-b border-white/5 flex justify-between items-center hover:bg-white/5 transition cursor-pointer group">
                         <div className="flex items-center gap-3"><Users className="w-5 h-5 text-accent-400 transition group-hover:scale-110" /><span className="text-sm font-medium text-gray-200">{t('invite')}</span></div>
                         <ChevronRight className="w-4 h-4 text-gray-600 rtl:rotate-180" />
@@ -713,7 +755,6 @@ const App: React.FC = () => {
   return (
     <div dir={language === 'ar' ? 'rtl' : 'ltr'} className={`w-full h-[100dvh] bg-gray-900 overflow-hidden flex flex-col font-sans relative`}>
       <main className="flex-1 overflow-hidden relative z-10">
-        {/* ROOM VIEW is PERSISTENT now to keep audio alive. It's just hidden via CSS when not active. */}
         {activeRoom && (
             <div className={`absolute inset-0 w-full h-full z-20 ${currentView === ViewState.ROOM ? 'block' : 'hidden'}`}>
                 <RoomView 
@@ -725,12 +766,10 @@ const App: React.FC = () => {
             </div>
         )}
         
-        {/* Only render other views if we are NOT in full Room View mode */}
         <div className={`w-full h-full ${currentView === ViewState.ROOM ? 'hidden' : 'block'}`}>
             {renderContent()}
         </div>
 
-        {/* Mini Player appears if we have an active room but we are NOT looking at it */}
         {((activeRoom && currentView !== ViewState.ROOM) || (minimizedRoom && !activeRoom)) && (
             <MiniRoomPlayer 
                 room={activeRoom || minimizedRoom!} 
@@ -740,7 +779,7 @@ const App: React.FC = () => {
         )}
       </main>
       
-      {currentView !== ViewState.ROOM && currentView !== ViewState.PRIVATE_CHAT && currentView !== ViewState.STORE && currentView !== ViewState.WALLET && currentView !== ViewState.VIP && currentView !== ViewState.ADMIN && currentView !== ViewState.GAMES && currentView !== ViewState.SEARCH && currentView !== ViewState.AGENCY && (
+      {currentView !== ViewState.ROOM && currentView !== ViewState.PRIVATE_CHAT && currentView !== ViewState.STORE && currentView !== ViewState.WALLET && currentView !== ViewState.VIP && currentView !== ViewState.ADMIN && currentView !== ViewState.GAMES && currentView !== ViewState.SEARCH && currentView !== ViewState.AGENCY && currentView !== ViewState.WELCOME_AGENCY && currentView !== ViewState.BAN_SYSTEM && (
         <nav className="h-[80px] bg-gray-900 border-t border-white/5 flex justify-around items-center px-2 pb-2 z-50 relative safe-pb">
           <button onClick={() => setCurrentView(ViewState.HOME)} className={`flex flex-col items-center p-2 rounded-lg transition ${currentView === ViewState.HOME ? 'text-brand-500' : 'text-gray-500'}`}><Home className="w-6 h-6" /><span className="text-[10px] mt-1 font-bold">{t('home')}</span></button>
           

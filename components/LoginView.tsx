@@ -40,8 +40,9 @@ const LoginView: React.FC<LoginViewProps> = ({ language, setLanguage, onGuestLog
         } else {
             await loginWithEmail(email, password);
         }
-    } catch (e) {
+    } catch (e: any) {
         setLoading(false);
+        alert(e.message || "Authentication failed");
     }
   };
 

@@ -41,8 +41,27 @@ import {
   RoomSeat,
   Visitor,
   RelatedUser,
-  WealthTransaction
+  WealthTransaction,
+  WelcomeRequest
 } from '../types';
+
+// --- Account Creation Limit Logic ---
+const MAX_ACCOUNTS = 2;
+const ACCOUNTS_KEY = 'flex_device_accounts';
+
+const checkCreationLimit = () => {
+    const stored = localStorage.getItem(ACCOUNTS_KEY);
+    const count = stored ? parseInt(stored) : 0;
+    if (count >= MAX_ACCOUNTS) {
+        throw new Error("عفواً، لقد وصلت للحد الأقصى لإنشاء الحسابات (2 حساب فقط). غير مسموح بإنشاء أكثر.");
+    }
+};
+
+const incrementCreationCount = () => {
+    const stored = localStorage.getItem(ACCOUNTS_KEY);
+    const count = stored ? parseInt(stored) : 0;
+    localStorage.setItem(ACCOUNTS_KEY, (count + 1).toString());
+};
 
 // --- Helper to Sanitize Data for Firestore ---
 // Ensure NO undefined values are passed to Firestore
@@ -71,6 +90,7 @@ export const loginWithEmail = async (email: string, pass: string) => {
 };
 
 export const registerWithEmail = async (email: string, pass: string) => {
+  checkCreationLimit(); // Check limit before creating Auth user
   return await createUserWithEmailAndPassword(auth, email, pass);
 };
 
@@ -86,6 +106,8 @@ export const getUserProfile = async (uid: string): Promise<User | null> => {
 };
 
 export const createUserProfile = async (uid: string, data: Partial<User>) => {
+  checkCreationLimit(); // Check limit before saving profile
+
   const displayId = Math.floor(100000 + Math.random() * 900000).toString();
   const userData: User = {
     uid,
@@ -99,6 +121,7 @@ export const createUserProfile = async (uid: string, data: Partial<User>) => {
     receivedGifts: {},
     vip: false,
     vipLevel: 0,
+    vipExpiresAt: 0,
     wallet: { diamonds: 0, coins: 0 },
     equippedFrame: '',
     equippedBubble: '',
@@ -113,9 +136,12 @@ export const createUserProfile = async (uid: string, data: Partial<User>) => {
     canCreateRoom: false, // Default: creating rooms is locked
     dailyProfit: 0,
     lastDailyReset: Date.now(),
+    isWelcomeAgent: false,
     ...data
   };
   await setDoc(doc(db, 'users', uid), userData);
+  
+  incrementCreationCount(); // Increment only after successful creation
   return userData;
 };
 
@@ -138,9 +164,26 @@ export const deleteUserProfile = async (uid: string) => {
 };
 
 export const listenToUserProfile = (uid: string, callback: (user: User | null) => void): Unsubscribe => {
-  return onSnapshot(doc(db, 'users', uid), (doc) => {
-    if (doc.exists()) callback(doc.data() as User);
-    else callback(null);
+  return onSnapshot(doc(db, 'users', uid), (docSnapshot) => {
+    if (docSnapshot.exists()) {
+        const userData = docSnapshot.data() as User;
+        
+        // Check VIP Expiration
+        if (userData.vip && userData.vipExpiresAt && userData.vipExpiresAt > 0 && userData.vipExpiresAt < Date.now()) {
+            // VIP has expired
+            updateDoc(doc(db, 'users', uid), {
+                vip: false,
+                vipLevel: 0,
+                vipExpiresAt: 0
+            }).catch(console.error);
+            // The listener will fire again with updated data, so we don't need to callback manually here usually,
+            // but we pass the current data for now.
+        }
+
+        callback(userData);
+    } else {
+        callback(null);
+    }
   });
 };
 
@@ -149,6 +192,74 @@ export const searchUserByDisplayId = async (displayId: string): Promise<User | n
   const snap = await getDocs(q);
   if (!snap.empty) return snap.docs[0].data() as User;
   return null;
+};
+
+// --- Welcome Agency System ---
+
+export const submitWelcomeRequest = async (agent: User, targetDisplayId: string) => {
+    // 1. Verify target user exists
+    const targetUser = await searchUserByDisplayId(targetDisplayId);
+    if (!targetUser) throw new Error("المستخدم غير موجود");
+
+    // 2. Create Request
+    await addDoc(collection(db, 'welcome_requests'), {
+        agentId: agent.uid,
+        agentName: agent.name,
+        targetDisplayId: targetDisplayId,
+        status: 'pending',
+        timestamp: Date.now()
+    });
+};
+
+export const listenToWelcomeRequests = (callback: (requests: WelcomeRequest[]) => void): Unsubscribe => {
+    const q = query(collection(db, 'welcome_requests'), where('status', '==', 'pending'), orderBy('timestamp', 'desc'));
+    return onSnapshot(q, (snap) => {
+        const reqs: WelcomeRequest[] = [];
+        snap.forEach(d => reqs.push({ id: d.id, ...d.data() } as WelcomeRequest));
+        callback(reqs);
+    });
+};
+
+export const approveWelcomeRequest = async (requestId: string, targetDisplayId: string) => {
+    // 1. Find User
+    const user = await searchUserByDisplayId(targetDisplayId);
+    if (!user || !user.uid) throw new Error("المستخدم المستهدف غير موجود");
+
+    const batch = writeBatch(db);
+    
+    // 2. Update User (VIP 5 + 20M Diamonds)
+    // VIP Expires in 7 Days (1 week)
+    const oneWeek = 7 * 24 * 60 * 60 * 1000;
+    const expiresAt = Date.now() + oneWeek;
+
+    const userRef = doc(db, 'users', user.uid);
+    batch.update(userRef, {
+        vip: true,
+        vipLevel: 5,
+        vipExpiresAt: expiresAt,
+        'wallet.diamonds': increment(20000000)
+    });
+
+    // 3. Mark Request Approved (or delete it to clean up)
+    const reqRef = doc(db, 'welcome_requests', requestId);
+    batch.update(reqRef, { status: 'approved' });
+
+    // 4. Send Notification
+    const notifRef = collection(db, `users/${user.uid}/notifications`);
+    batch.set(doc(notifRef), {
+        id: Date.now().toString(),
+        type: 'system',
+        title: '🎉 Welcome Bonus',
+        body: 'تم قبول طلب الترحيب! حصلت على VIP 5 (لمدة 7 أيام) و 20 مليون ماسة.',
+        timestamp: Date.now(),
+        read: false
+    });
+
+    await batch.commit();
+};
+
+export const rejectWelcomeRequest = async (requestId: string) => {
+    await updateDoc(doc(db, 'welcome_requests', requestId), { status: 'rejected' });
 };
 
 // --- Profile Interactions (Lists & Visits) ---
@@ -911,11 +1022,56 @@ export const listenToNotifications = (uid: string, type: 'system' | 'official', 
     }
 };
 
-export const listenToUnreadNotifications = (uid: string, callback: (count: number) => void): Unsubscribe => {
-    const q = query(collection(db, `users/${uid}/notifications`), where('read', '==', false));
-    return onSnapshot(q, (snap) => {
-        callback(snap.size);
+// UPDATED: Return detailed counts for separate badges
+export const listenToUnreadNotifications = (uid: string, callback: (counts: { system: number, official: number, total: number }) => void): Unsubscribe => {
+    let systemCount = 0;
+    let broadcastCount = 0;
+    let currentBroadcastSnap: any = null; // Hold reference to snapshot
+
+    const calculateBroadcasts = () => {
+        if (!currentBroadcastSnap) return 0;
+        const lastRead = parseInt(localStorage.getItem(`last_broadcast_read_${uid}`) || '0');
+        // Filter docs based on timestamp vs lastRead
+        return currentBroadcastSnap.docs.filter((doc: any) => doc.data().timestamp > lastRead).length;
+    };
+
+    const updateCallback = () => {
+        callback({ system: systemCount, official: broadcastCount, total: systemCount + broadcastCount });
+    };
+
+    // 1. System Notifications (Firestore)
+    const qSystem = query(collection(db, `users/${uid}/notifications`), where('read', '==', false));
+    const unsubSystem = onSnapshot(qSystem, (snap) => {
+        systemCount = snap.size;
+        updateCallback();
     });
+
+    // 2. Official Broadcasts (Global + LocalStorage check)
+    const qBroadcast = query(collection(db, 'broadcasts'), orderBy('timestamp', 'desc'), limit(10));
+    const unsubBroadcast = onSnapshot(qBroadcast, (snap) => {
+        currentBroadcastSnap = snap;
+        broadcastCount = calculateBroadcasts();
+        updateCallback();
+    });
+
+    // 3. Listen for local read action (Custom Event)
+    const handleLocalRead = () => {
+        broadcastCount = calculateBroadcasts();
+        updateCallback();
+    };
+    window.addEventListener('flex_official_read', handleLocalRead);
+
+    return () => {
+        unsubSystem();
+        unsubBroadcast();
+        window.removeEventListener('flex_official_read', handleLocalRead);
+    };
+};
+
+// NEW: Helper to mark broadcasts as read locally
+export const markOfficialMessagesRead = (uid: string) => {
+    localStorage.setItem(`last_broadcast_read_${uid}`, Date.now().toString());
+    window.dispatchEvent(new Event('flex_official_read'));
 };
 
 export const markSystemNotificationsRead = async (uid: string) => {
